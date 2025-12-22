@@ -1718,8 +1718,8 @@ display_all = display_all.rename(columns={"In Time Obj": "In Time", "Out Time Ob
 display_all["_orig_idx"] = display_all.index
 display_all = display_all.reset_index(drop=True)
 
-# Convert all text columns to string to avoid type compatibility issues (BUT NOT TIME COLUMNS)
-for col in ["Patient Name", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "OP", "SUCTION", "CLEANING", "STATUS"]:
+# Convert text columns to string to avoid type compatibility issues (BUT NOT TIME/BOOL COLUMNS)
+for col in ["Patient Name", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "OP", "STATUS"]:
     if col in display_all.columns:
         display_all[col] = display_all[col].astype(str).replace('nan', '')
 
@@ -1875,7 +1875,7 @@ if unique_ops:
     for tab, op in zip(tabs, unique_ops):
         with tab:
             op_df = df[df["OP"] == op]
-            display_op = op_df[["Patient Name", "In Time Obj", "Out Time Obj", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "SUCTION", "CLEANING", "STATUS"]].copy()
+            display_op = op_df[["Patient Name", "In Time Obj", "Out Time Obj", "Procedure", "DR.", "OP", "FIRST", "SECOND", "Third", "CASE PAPER", "SUCTION", "CLEANING", "STATUS"]].copy()
             display_op = display_op.rename(columns={"In Time Obj": "In Time", "Out Time Obj": "Out Time"})
             # Preserve original index for mapping edits back to df_raw
             display_op["_orig_idx"] = display_op.index
@@ -1981,7 +1981,7 @@ if unique_ops:
                                     f"{t.hour:02d}:{t.minute:02d}" if t is not None else ""
                                 )
 
-                            for c in ["Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "STATUS"]:
+                            for c in ["Procedure", "DR.", "OP", "FIRST", "SECOND", "Third", "CASE PAPER", "STATUS"]:
                                 if c in row.index and c in df_updated.columns:
                                     val = row.get(c)
                                     clean_val = str(val).strip() if val and str(val) != "nan" else ""
