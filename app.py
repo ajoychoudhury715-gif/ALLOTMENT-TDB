@@ -1998,14 +1998,15 @@ with col_del_pick:
             st.session_state.delete_row_id = ""
 
         if option_map:
+            # Use a visible sentinel option instead of `placeholder` for wider Streamlit compatibility.
+            sentinel = "Select row to delete…"
             chosen = st.selectbox(
                 "Delete row",
-                options=[""] + sorted(option_map.keys()),
+                options=[sentinel] + sorted(option_map.keys()),
                 key="delete_row_select",
                 label_visibility="collapsed",
-                placeholder="Delete row…",
             )
-            if chosen:
+            if chosen and chosen != sentinel:
                 st.session_state.delete_row_id = option_map.get(chosen, "")
         else:
             st.caption("Delete row")
