@@ -1849,7 +1849,7 @@ edited_all = st.data_editor(
         "CLEANING": st.column_config.CheckboxColumn(label="🧹 CLEANING"),
         "STATUS": st.column_config.SelectboxColumn(
             label="STATUS",
-            options=["WAITING", "ARRIVED", "ON GOING", "CANCELLED", "SHIFTED"],
+            options=["WAITING", "ARRIVED", "ON GOING", "CANCELLED", "SHIFTED", "DONE"],
             required=False
         )
     }
@@ -1951,7 +1951,10 @@ if unique_ops:
     tabs = st.tabs([str(op) for op in unique_ops])
     for tab, op in zip(tabs, unique_ops):
         with tab:
-            op_df = df[df["OP"] == op]
+            op_df = df[
+                (df["OP"] == op)
+                & ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE", na=True)
+            ]
             display_op = op_df[["Patient Name", "In Time Obj", "Out Time Obj", "Procedure", "DR.", "OP", "FIRST", "SECOND", "Third", "CASE PAPER", "SUCTION", "CLEANING", "STATUS"]].copy()
             display_op = display_op.rename(columns={"In Time Obj": "In Time", "Out Time Obj": "Out Time"})
             # Preserve original index for mapping edits back to df_raw
@@ -2002,7 +2005,7 @@ if unique_ops:
                     ),
                     "STATUS": st.column_config.SelectboxColumn(
                         label="STATUS",
-                        options=["WAITING", "ARRIVED", "ON GOING", "CANCELLED", "SHIFTED"],
+                        options=["WAITING", "ARRIVED", "ON GOING", "CANCELLED", "SHIFTED", "DONE"],
                         required=False
                     )
                 }
