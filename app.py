@@ -182,9 +182,15 @@ st.markdown(
     
     /* Table Header Styling - Premium & Elegant */
     [data-testid="stDataFrameContainer"] thead {{
-        background: linear-gradient(135deg, #99582f 0%, #7a4629 100%) !important;
-        border-bottom: 4px solid #c9bbb0 !important;
-        box-shadow: 0 2px 8px rgba(153, 88, 47, 0.15) !important;
+        background: linear-gradient(
+            90deg,
+            {COLORS['info']} 0%,
+            {COLORS['button_bg']} 35%,
+            {COLORS['success']} 70%,
+            {COLORS['warning']} 100%
+        ) !important;
+        border-bottom: 4px solid {COLORS['accent']} !important;
+        box-shadow: 0 6px 18px rgba(17, 27, 38, 0.12) !important;
     }}
     
     [data-testid="stDataFrameContainer"] thead th {{
@@ -195,12 +201,18 @@ st.markdown(
         font-size: 0.99rem !important;
         letter-spacing: 1px !important;
         text-transform: uppercase !important;
-        background: linear-gradient(135deg, #99582f 0%, #7a4629 100%) !important;
+        background: linear-gradient(
+            90deg,
+            rgba(59, 130, 246, 0.95) 0%,
+            rgba(153, 88, 47, 0.98) 38%,
+            rgba(16, 185, 129, 0.96) 72%,
+            rgba(245, 158, 11, 0.96) 100%
+        ) !important;
         position: relative !important;
         text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3) !important;
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
         transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        border-right: 1px solid rgba(0, 0, 0, 0.1) !important;
+        border-right: 1px solid rgba(255, 255, 255, 0.18) !important;
     }}
     
     [data-testid="stDataFrameContainer"] thead th:last-child {{
@@ -208,9 +220,9 @@ st.markdown(
     }}
     
     [data-testid="stDataFrameContainer"] thead th:hover {{
-        background: linear-gradient(135deg, #7a4629 0%, #99582f 100%) !important;
+        filter: brightness(1.06) !important;
         transform: translateY(-2px) !important;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 4px 12px rgba(153, 88, 47, 0.3) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 10px 22px rgba(17, 27, 38, 0.18) !important;
     }}
     
     /* Premium Table Rows */
