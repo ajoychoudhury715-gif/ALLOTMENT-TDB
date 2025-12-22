@@ -733,6 +733,7 @@ def _get_supabase_config_from_secrets_or_env():
     """Return (url, key, table, row_id) from Streamlit secrets/env vars."""
     url = ""
     key = ""
+    service_key = ""
     table = supabase_table_name
     row_id = supabase_row_id
 
@@ -740,6 +741,7 @@ def _get_supabase_config_from_secrets_or_env():
         if hasattr(st, 'secrets'):
             url = str(st.secrets.get("supabase_url", "") or "").strip()
             key = str(st.secrets.get("supabase_key", "") or "").strip()
+            service_key = str(st.secrets.get("supabase_service_role_key", "") or "").strip()
             table = str(st.secrets.get("supabase_table", table) or table).strip() or table
             row_id = str(st.secrets.get("supabase_row_id", row_id) or row_id).strip() or row_id
     except Exception:
@@ -749,12 +751,16 @@ def _get_supabase_config_from_secrets_or_env():
         url = os.getenv("SUPABASE_URL", "").strip()
     if not key:
         key = os.getenv("SUPABASE_KEY", "").strip()
+    if not service_key:
+        service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
     if os.getenv("SUPABASE_TABLE"):
         table = os.getenv("SUPABASE_TABLE", table).strip() or table
     if os.getenv("SUPABASE_ROW_ID"):
         row_id = os.getenv("SUPABASE_ROW_ID", row_id).strip() or row_id
 
-    return url, key, table, row_id
+    # Prefer service role key when present (avoids RLS setup for server-side app).
+    effective_key = service_key or key
+    return url, effective_key, table, row_id
 
 
 def _get_expected_columns():
@@ -842,8 +848,47 @@ if SUPABASE_AVAILABLE:
             _ = supabase_client.table(supabase_table_name).select("id").limit(1).execute()
             USE_SUPABASE = True
             st.sidebar.success("🗄️ Connected to Supabase")
+        else:
+            # Not configured; show a quick setup helper.
+            with st.sidebar.expander("✅ Quick setup (Supabase)", expanded=False):
+                st.markdown(
+                    "Add these secrets in Streamlit Cloud → Settings → Secrets:\n"
+                    "- `supabase_url`\n"
+                    "- `supabase_key` (anon key) **or** `supabase_service_role_key` (recommended for server-side apps)\n"
+                    "\nThen create the table in Supabase (SQL Editor):"
+                )
+                st.code(
+                    "create table if not exists tdb_allotment_state (\n"
+                    "  id text primary key,\n"
+                    "  payload jsonb not null,\n"
+                    "  updated_at timestamptz not null default now()\n"
+                    ");\n",
+                    language="sql",
+                )
+                st.markdown(
+                    "If you use the **anon key**, you may need to adjust Row Level Security (RLS). "
+                    "Simplest (not recommended for public apps):"
+                )
+                st.code(
+                    "alter table tdb_allotment_state disable row level security;\n",
+                    language="sql",
+                )
     except Exception as e:
-        st.sidebar.error(f"⚠️ Supabase connection failed: {e}")
+        # Safe diagnostics: only presence of keys, not values.
+        present = {}
+        try:
+            if hasattr(st, 'secrets'):
+                interesting = ["supabase_url", "supabase_key", "supabase_service_role_key", "supabase_table", "supabase_row_id"]
+                present = {k: (k in st.secrets and bool(str(st.secrets.get(k, '')).strip())) for k in interesting}
+        except Exception:
+            pass
+
+        st.sidebar.error(
+            f"⚠️ Supabase connection failed: {e}"
+            + ("\n\nSecrets keys (safe): " + ", ".join([f"{k}={v}" for k, v in present.items()]) if present else "")
+            + "\n\nTip: If you are using `supabase_key` (anon key), RLS may block reads/writes. "
+              "Either add a server-side `supabase_service_role_key` in Streamlit Secrets or disable RLS for this table."
+        )
         USE_SUPABASE = False
 
 # Try to connect to Google Sheets if credentials are available (fallback)

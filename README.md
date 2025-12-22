@@ -59,6 +59,9 @@ create table if not exists tdb_allotment_state (
 supabase_url = "https://YOUR_PROJECT_REF.supabase.co"
 supabase_key = "YOUR_SUPABASE_ANON_KEY"
 
+# Optional (recommended): avoids Row Level Security (RLS) blocking reads/writes
+# supabase_service_role_key = "YOUR_SUPABASE_SERVICE_ROLE_KEY"
+
 # Optional overrides:
 # supabase_table = "tdb_allotment_state"
 # supabase_row_id = "main"
