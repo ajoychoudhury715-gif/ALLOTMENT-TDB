@@ -1921,7 +1921,7 @@ def highlight_row(row):
 st.markdown("### 📅 Full Today's Schedule")
 
 # Add new patient button and save button
-col1, col2, col3 = st.columns([0.15, 0.15, 0.7])
+col1, col2, col3, col4 = st.columns([0.15, 0.15, 0.15, 0.55])
 
 # Selected patient from external patient DB (optional)
 if "selected_patient_id" not in st.session_state:
@@ -2050,6 +2050,129 @@ with col2:
             save_data(df_raw, message="Data saved successfully!")
         except Exception as e:
             st.error(f"Error saving: {e}")
+
+with col3:
+    # Compact delete row control (uses stable REMINDER_ROW_ID)
+    try:
+        candidates = df_raw.copy()
+        if "Patient Name" in candidates.columns:
+            candidates["Patient Name"] = candidates["Patient Name"].astype(str).replace("nan", "").fillna("")
+        if "REMINDER_ROW_ID" in candidates.columns:
+            candidates["REMINDER_ROW_ID"] = candidates["REMINDER_ROW_ID"].astype(str).replace("nan", "").fillna("")
+
+        candidates = candidates[
+            (candidates.get("Patient Name", "").astype(str).str.strip() != "")
+            & (candidates.get("REMINDER_ROW_ID", "").astype(str).str.strip() != "")
+        ]
+
+        delete_options = []
+        if not candidates.empty:
+            for _, r in candidates.iterrows():
+                rid = str(r.get("REMINDER_ROW_ID", "")).strip()
+                if not rid:
+                    continue
+                pname = str(r.get("Patient Name", "")).strip()
+                in_t = str(r.get("In Time", "")).strip()
+                op = str(r.get("OP", "")).strip()
+                label = " · ".join([p for p in [pname, in_t, op] if p])
+                delete_options.append((label, rid))
+
+        if "delete_row_id" not in st.session_state:
+            st.session_state.delete_row_id = ""
+
+        if delete_options:
+            chosen = st.selectbox(
+                "Delete row",
+                options=[""] + [f"{lbl}" for (lbl, _) in delete_options],
+                key="delete_row_select",
+                label_visibility="collapsed",
+                placeholder="Delete row…",
+            )
+            if chosen:
+                for lbl, rid in delete_options:
+                    if lbl == chosen:
+                        st.session_state.delete_row_id = rid
+                        break
+        else:
+            st.caption("Delete row")
+    except Exception:
+        # Keep dashboard usable even if data is incomplete
+        st.caption("Delete row")
+
+with col4:
+    if st.button("🗑️ Delete", width="stretch", key="delete_row_btn"):
+        rid = str(st.session_state.get("delete_row_id", "") or "").strip()
+        if not rid:
+            st.warning("Select a row to delete")
+        else:
+            try:
+                if "REMINDER_ROW_ID" not in df_raw.columns:
+                    raise ValueError("Missing REMINDER_ROW_ID column")
+                df_updated = df_raw[df_raw["REMINDER_ROW_ID"].astype(str) != rid].copy()
+                save_data(df_updated, message="Row deleted")
+                st.session_state.delete_row_id = ""
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error deleting row: {e}")
+
+# Delete row control (uses stable REMINDER_ROW_ID)
+try:
+    if "REMINDER_ROW_ID" in df_raw.columns and "Patient Name" in df_raw.columns:
+        _del_df = df_raw.copy()
+        _del_df["Patient Name"] = _del_df["Patient Name"].astype(str).replace("nan", "").str.strip()
+        _del_df["REMINDER_ROW_ID"] = _del_df["REMINDER_ROW_ID"].astype(str).replace("nan", "").str.strip()
+        _del_df = _del_df[(_del_df["Patient Name"] != "") & (_del_df["REMINDER_ROW_ID"] != "")]
+
+        if not _del_df.empty:
+            del_left, del_right = st.columns([0.75, 0.25], vertical_alignment="bottom")
+
+            # Build display strings
+            _del_map: dict[str, str] = {}
+            for _, r in _del_df.iterrows():
+                rid = str(r.get("REMINDER_ROW_ID", "")).strip()
+                name = str(r.get("Patient Name", "")).strip()
+                in_time = str(r.get("In Time", "")).strip()
+                proc = str(r.get("Procedure", "")).strip()
+                label = f"{name} • {in_time} • {proc}".strip(" •")
+                if rid and label:
+                    _del_map[label] = rid
+
+            with del_left:
+                chosen_label = st.selectbox(
+                    "Delete row",
+                    options=[""] + sorted(_del_map.keys()),
+                    key="delete_row_select",
+                    label_visibility="collapsed",
+                    placeholder="Select row to delete…",
+                )
+            with del_right:
+                if st.button(
+                    "🗑️ Delete",
+                    width="stretch",
+                    key="delete_row_btn",
+                    disabled=(not chosen_label),
+                ):
+                    rid = _del_map.get(chosen_label, "")
+                    if rid:
+                        df_updated = df_raw[df_raw["REMINDER_ROW_ID"].astype(str) != str(rid)].reset_index(drop=True)
+
+                        # Clear local reminder state for this row id.
+                        try:
+                            if "snoozed" in st.session_state and rid in st.session_state.snoozed:
+                                del st.session_state.snoozed[rid]
+                            if "reminder_sent" in st.session_state:
+                                st.session_state.reminder_sent.discard(rid)
+                        except Exception:
+                            pass
+
+                        save_data(df_updated, message="Row deleted")
+                        st.session_state.delete_row_select = ""
+                        st.rerun()
+        else:
+            st.caption("No rows to delete")
+except Exception:
+    # Never block the schedule view if delete UI fails.
+    pass
 
 all_sorted = df
 display_all = all_sorted[["Patient ID", "Patient Name", "In Time Obj", "Out Time Obj", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "OP", "SUCTION", "CLEANING", "STATUS"]].copy()
