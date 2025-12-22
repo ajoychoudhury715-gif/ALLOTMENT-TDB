@@ -4,6 +4,8 @@ from datetime import datetime, time, timezone, timedelta
 import os
 # Add missing import
 import hashlib
+import re  # for creating safe keys for buttons
+import uuid  # for generating stable row IDs
 # To install required packages, run in your terminal:
 # pip install --upgrade pip
 # pip install pandas openpyxl streamlit streamlit-autorefresh
@@ -560,6 +562,12 @@ IST = timezone(timedelta(hours=5, minutes=30))
 now = datetime.now(IST)
 st.markdown(f" {now.strftime('%B %d, %Y - %I:%M:%S %p')} IST")
 
+# --- Reminder settings in sidebar ---
+with st.sidebar:
+    st.markdown("## 🔔 Notifications")
+    st.checkbox("Enable 15-minute reminders", value=True, key="enable_reminders")
+    st.selectbox("Default snooze (minutes)", options=[5,10,15,30], index=0, key="default_snooze")
+    st.write("💡 Reminders alert 15 minutes before a patient's In Time.")
 
 # File check using absolute path
 file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Putt Allotment.xlsx")
@@ -771,8 +779,62 @@ df.loc[df["Out_min"] < df["In_min"], "Out_min"] += 1440
 # Current time in minutes (same day)
 current_min = now.hour * 60 + now.minute
 
+# ================ Reminder Persistence Setup ================
+# Add stable row IDs and reminder columns if they don't exist
+if 'REMINDER_ROW_ID' not in df_raw.columns:
+    df_raw['REMINDER_ROW_ID'] = [str(uuid.uuid4()) for _ in range(len(df_raw))]
+    # Save IDs immediately
+    try:
+        with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+            df_raw.to_excel(writer, sheet_name='Sheet1', index=False)
+        st.toast("🆔 Generated stable row IDs for reminders", icon="✅")
+    except Exception:
+        pass
+
+if 'REMINDER_SNOOZE_UNTIL' not in df_raw.columns:
+    df_raw['REMINDER_SNOOZE_UNTIL'] = pd.NA
+if 'REMINDER_DISMISSED' not in df_raw.columns:
+    df_raw['REMINDER_DISMISSED'] = False
+
+# Refresh df with new columns
+df = df_raw.copy()
+
+# Re-process time columns after df reassignment
+df["In Time Str"] = df["In Time"].apply(dec_to_time)
+df["Out Time Str"] = df["Out Time"].apply(dec_to_time)
+df["In Time Obj"] = df["In Time Str"].apply(safe_str_to_time_obj)
+df["Out Time Obj"] = df["Out Time Str"].apply(safe_str_to_time_obj)
+
+# Re-convert checkbox columns
+if "SUCTION" in df.columns:
+    df["SUCTION"] = df["SUCTION"].apply(str_to_checkbox)
+if "CLEANING" in df.columns:
+    df["CLEANING"] = df["CLEANING"].apply(str_to_checkbox)
+
+# Ensure In_min/Out_min exist
+df["In_min"] = df["In Time"].apply(time_to_minutes).astype('Int64')
+df["Out_min"] = df["Out Time"].apply(time_to_minutes).astype('Int64')
+# Handle possible overnight cases
+df.loc[df["Out_min"] < df["In_min"], "Out_min"] += 1440
+
 # Mark ongoing
 df["Is_Ongoing"] = (df["In_min"] <= current_min) & (current_min <= df["Out_min"])
+
+# Helper to persist reminder state
+def _persist_reminder_to_excel(row_id, until, dismissed):
+    """Persist snooze/dismiss fields back to Excel by row ID."""
+    try:
+        match = df_raw[df_raw.get('REMINDER_ROW_ID') == row_id]
+        if not match.empty:
+            ix = match.index[0]
+            df_raw.at[ix, 'REMINDER_SNOOZE_UNTIL'] = int(until) if until is not None else pd.NA
+            df_raw.at[ix, 'REMINDER_DISMISSED'] = bool(dismissed)
+            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                df_raw.to_excel(writer, sheet_name='Sheet1', index=False)
+            return True
+    except Exception as e:
+        st.error(f"Error persisting reminder: {e}")
+    return False
 
 # ================ Change Detection & Notifications ================
 if 'prev_hash' not in st.session_state:
@@ -780,6 +842,22 @@ if 'prev_hash' not in st.session_state:
     st.session_state.prev_ongoing = set()
     st.session_state.prev_upcoming = set()
     st.session_state.prev_raw = pd.DataFrame()
+    st.session_state.reminder_sent = set()  # Track reminders by row ID
+    st.session_state.snoozed = {}  # Map row_id -> snooze_until_min
+
+# Load persisted reminders from Excel
+for idx, row in df_raw.iterrows():
+    try:
+        row_id = row.get('REMINDER_ROW_ID')
+        if pd.notna(row_id):
+            until = row.get('REMINDER_SNOOZE_UNTIL')
+            if pd.notna(until) and int(until) > current_min:
+                st.session_state.snoozed[row_id] = int(until)
+            dismissed = row.get('REMINDER_DISMISSED')
+            if str(dismissed).strip().upper() in ['TRUE','1','T','YES']:
+                st.session_state.reminder_sent.add(row_id)
+    except Exception:
+        continue
 
 # Compute hash to detect file changes
 current_hash = hashlib.md5(pd.util.hash_pandas_object(df_raw).values.tobytes()).hexdigest()
@@ -789,8 +867,14 @@ if st.session_state.prev_hash != current_hash:
     # Reset tracked sets on file change
     st.session_state.prev_ongoing = set()
     st.session_state.prev_upcoming = set()
+    st.session_state.reminder_sent = set()
+    st.session_state.snoozed = {}
 
 st.session_state.prev_hash = current_hash
+
+# Ensure Is_Ongoing column exists before using it
+if "Is_Ongoing" not in df.columns:
+    df["Is_Ongoing"] = (df["In_min"] <= current_min) & (current_min <= df["Out_min"])
 
 # Currently Ongoing (filtered)
 ongoing_df = df[
@@ -821,7 +905,105 @@ new_upcoming = current_upcoming - st.session_state.prev_upcoming
 for patient in new_upcoming:
     row = upcoming_df[upcoming_df["Patient Name"] == patient].iloc[0]
     mins_left = row["In_min"] - current_min
-    st.toast(f"⏰ Upcoming in ~{mins_left} min: {patient} – {row['Patient Name']} with {row['DR.']}", icon="⚠️")
+    st.toast(f"⏰ Upcoming in ~{mins_left} min: {patient} – {row['Procedure']} with {row['DR.']}", icon="⚠️")
+
+# ================ 15-Minute Reminder System ================
+if st.session_state.get("enable_reminders", True):
+    # Clean up expired snoozes
+    expired = [rid for rid, until in list(st.session_state.snoozed.items()) if until <= current_min]
+    for rid in expired:
+        del st.session_state.snoozed[rid]
+        _persist_reminder_to_excel(rid, None, False)
+    
+    # Find patients needing reminders (0-15 min before In Time)
+    reminder_df = df[
+        (df["In_min"].notna()) &
+        (df["In_min"] - current_min > 0) &
+        (df["In_min"] - current_min <= 15) &
+        ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE|SHIFTED", na=True)
+    ].copy()
+    
+    # Show toast for new reminders (not snoozed, not dismissed)
+    for idx, row in reminder_df.iterrows():
+        row_id = row.get('REMINDER_ROW_ID')
+        if pd.isna(row_id):
+            continue
+        patient = row.get("Patient Name", "Unknown")
+        mins_left = int(row["In_min"] - current_min)
+        
+        # Skip if snoozed or already reminded
+        if row_id in st.session_state.snoozed or row_id in st.session_state.reminder_sent:
+            continue
+        
+        st.toast(f"🔔 Reminder: {patient} in ~{mins_left} min at {row['In Time Str']} with {row.get('DR.','')} (OP {row.get('OP','')})", icon="🔔")
+        st.session_state.reminder_sent.add(row_id)
+    
+    # Reminder management UI
+    def _safe_key(s):
+        return re.sub(r"\W+", "_", str(s))
+    
+    with st.expander("🔔 Manage Reminders", expanded=False):
+        if reminder_df.empty:
+            st.caption("No upcoming appointments in the next 15 minutes.")
+        else:
+            for idx, row in reminder_df.iterrows():
+                row_id = row.get('REMINDER_ROW_ID')
+                if pd.isna(row_id):
+                    continue
+                patient = row.get('Patient Name', 'Unknown')
+                mins_left = int(row["In_min"] - current_min)
+                
+                col1, col2, col3, col4, col5 = st.columns([4,1,1,1,1])
+                col1.markdown(f"**{patient}** — {row.get('Procedure','')} (in ~{mins_left} min at {row.get('In Time Str','')})")  
+                
+                default_snooze = int(st.session_state.get("default_snooze", 5))
+                if col2.button(f"💤 {default_snooze}min", key=f"snooze_{_safe_key(row_id)}_default"):
+                    until = current_min + default_snooze
+                    st.session_state.snoozed[row_id] = until
+                    st.session_state.reminder_sent.discard(row_id)
+                    _persist_reminder_to_excel(row_id, until, False)
+                    st.toast(f"😴 Snoozed {patient} for {default_snooze} min", icon="💤")
+                    st.rerun()
+                    
+                if col3.button("💤 5", key=f"snooze_{_safe_key(row_id)}_5"):
+                    until = current_min + 5
+                    st.session_state.snoozed[row_id] = until
+                    st.session_state.reminder_sent.discard(row_id)
+                    _persist_reminder_to_excel(row_id, until, False)
+                    st.toast(f"😴 Snoozed {patient} for 5 min", icon="💤")
+                    st.rerun()
+                    
+                if col4.button("💤 10", key=f"snooze_{_safe_key(row_id)}_10"):
+                    until = current_min + 10
+                    st.session_state.snoozed[row_id] = until
+                    st.session_state.reminder_sent.discard(row_id)
+                    _persist_reminder_to_excel(row_id, until, False)
+                    st.toast(f"😴 Snoozed {patient} for 10 min", icon="💤")
+                    st.rerun()
+                    
+                if col5.button("🗑️", key=f"dismiss_{_safe_key(row_id)}"):
+                    st.session_state.reminder_sent.add(row_id)
+                    _persist_reminder_to_excel(row_id, None, True)
+                    st.toast(f"✅ Dismissed reminder for {patient}", icon="✅")
+                    st.rerun()
+            
+            # Show snoozed reminders
+            if st.session_state.snoozed:
+                st.markdown("---")
+                st.markdown("**Snoozed Reminders**")
+                for row_id, until in list(st.session_state.snoozed.items()):
+                    remaining = until - current_min
+                    if remaining > 0:
+                        match_row = df[df.get('REMINDER_ROW_ID') == row_id]
+                        if not match_row.empty:
+                            name = match_row.iloc[0].get('Patient Name', row_id)
+                            c1, c2 = st.columns([4,1])
+                            c1.write(f"🕐 {name} — {remaining} min remaining")
+                            if c2.button("Cancel", key=f"cancel_{_safe_key(row_id)}"):
+                                del st.session_state.snoozed[row_id]
+                                _persist_reminder_to_excel(row_id, None, False)
+                                st.toast(f"✅ Cancelled snooze for {name}", icon="✅")
+                                st.rerun()
 
 # New arrivals (manual status change in Excel)
 current_arrived = set(df_raw[df_raw["STATUS"].astype(str).str.upper() == "ARRIVED"]["Patient Name"].dropna())
@@ -869,7 +1051,7 @@ st.markdown("### 📅 Full Today's Schedule")
 # Add new patient button and save button
 col1, col2, col3 = st.columns([0.15, 0.15, 0.7])
 with col1:
-    if st.button("➕ Add Patient", use_container_width=True):
+    if st.button("➕ Add Patient", width="stretch"):
         # Create a new empty row
         new_row = {
             "Patient Name": "",
@@ -884,7 +1066,10 @@ with col1:
             "OP": "",
             "SUCTION": False,
             "CLEANING": False,
-            "STATUS": "WAITING"
+            "STATUS": "WAITING",
+            "REMINDER_ROW_ID": str(uuid.uuid4()),
+            "REMINDER_SNOOZE_UNTIL": pd.NA,
+            "REMINDER_DISMISSED": False
         }
         # Append to the original dataframe
         new_row_df = pd.DataFrame([new_row])
@@ -896,7 +1081,7 @@ with col1:
         st.rerun()
 
 with col2:
-    if st.button("💾 Save", use_container_width=True, key="manual_save_btn"):
+    if st.button("💾 Save", width="stretch", key="manual_save_btn"):
         try:
             # Manually save current data to Excel
             with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
@@ -921,7 +1106,7 @@ display_all["Out Time"] = display_all["Out Time"].fillna(pd.NaT)
 
 edited_all = st.data_editor(
     display_all, 
-    use_container_width=True, 
+    width="stretch", 
     key="full_schedule_editor", 
     hide_index=True,
     column_config={
@@ -1080,7 +1265,7 @@ if unique_ops:
             
             edited_op = st.data_editor(
                 display_op, 
-                use_container_width=True, 
+                width="stretch", 
                 key=f"op_{str(op).replace(' ', '_')}_editor", 
                 hide_index=True,
                 column_config={
@@ -1135,7 +1320,7 @@ if groupby_column in df.columns and not df[groupby_column].isnull().all():
         doctor_procedures = df[df["DR."].notna()].groupby("DR.").size().reset_index(name="Total Procedures")
         doctor_procedures = doctor_procedures.reset_index(drop=True)
         if not doctor_procedures.empty:
-            edited_doctor = st.data_editor(doctor_procedures, use_container_width=True, key="doctor_editor", hide_index=True)
+            edited_doctor = st.data_editor(doctor_procedures, width="stretch", key="doctor_editor", hide_index=True)
         else:
             st.info(f"No data available for '{groupby_column}'.")
     except Exception as e:
