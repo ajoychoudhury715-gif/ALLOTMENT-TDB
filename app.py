@@ -624,6 +624,14 @@ def dec_to_time(time_value):
         return "N/A"
     
     try:
+        # Handle datetime.time objects (from Excel/openpyxl reading time as datetime.time)
+        if isinstance(time_value, time):
+            return f"{time_value.hour:02d}:{time_value.minute:02d}"
+        
+        # Handle datetime objects (in case Excel interprets as datetime)
+        if isinstance(time_value, datetime):
+            return f"{time_value.hour:02d}:{time_value.minute:02d}"
+        
         # If it's already a string in HH.MM or HH:MM format
         if isinstance(time_value, str):
             time_str = time_value.strip()
@@ -692,6 +700,14 @@ def safe_str_to_time_obj(time_str):
     if pd.isna(time_str) or time_str == "N/A" or time_str == "" or time_str is None:
         return None
     try:
+        # If it's already a time object, return it directly
+        if isinstance(time_str, time):
+            return time_str
+        
+        # Handle datetime objects (extract time part)
+        if isinstance(time_str, datetime):
+            return time(time_str.hour, time_str.minute)
+        
         time_str = str(time_str).strip()
         
         # Handle HH:MM format (with colon)
@@ -780,6 +796,14 @@ def time_to_minutes(time_value):
         return pd.NA
     
     try:
+        # Handle datetime.time objects (from Excel/openpyxl reading time as datetime.time)
+        if isinstance(time_value, time):
+            return time_value.hour * 60 + time_value.minute
+        
+        # Handle datetime objects (in case Excel interprets as datetime)
+        if isinstance(time_value, datetime):
+            return time_value.hour * 60 + time_value.minute
+        
         # If it's a string in HH.MM or HH:MM format
         if isinstance(time_value, str):
             time_str = time_value.strip()
