@@ -825,19 +825,36 @@ def search_patients_from_supabase(
     q = (_query or "").strip()
     client = create_client(_url, _key)
 
-    def _run(_id: str, _name: str):
-        query = client.table(_patients_table).select(f"{_id},{_name}")
-        if q:
+    def _is_simple_ident(name: str) -> bool:
+        return bool(re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", str(name or "")))
+
+    def _quote_ident(name: str) -> str:
+        n = str(name or "")
+        # Quote if it has spaces, punctuation, or uppercase/lowercase sensitivity.
+        if _is_simple_ident(n) and n == n.lower():
+            return n
+        return '"' + n.replace('"', '""') + '"'
+
+    def _run(_id: str, _name: str, *, server_filter: bool) -> list[dict] | None:
+        select_str = f"{_quote_ident(_id)},{_quote_ident(_name)}"
+        query = client.table(_patients_table).select(select_str)
+
+        # Only apply server-side ilike/order if the column name is a simple identifier.
+        if server_filter and q and _is_simple_ident(_name):
             query = query.ilike(_name, f"%{q}%")
-        resp = query.order(_name).limit(_limit).execute()
+        if server_filter and _is_simple_ident(_name):
+            query = query.order(_name)
+
+        resp = query.limit(_limit).execute()
         err = getattr(resp, "error", None)
         if err:
             raise RuntimeError(str(err))
-        return getattr(resp, "data", None)
+        data = getattr(resp, "data", None)
+        return data
 
     # PostgREST supports ilike and order.
     try:
-        data = _run(_id_col, _name_col)
+        data = _run(_id_col, _name_col, server_filter=True)
     except Exception as e:
         # Common case: columns are not named exactly `id`/`name`.
         # Postgres error code for unknown column is 42703.
@@ -845,42 +862,84 @@ def search_patients_from_supabase(
         if "42703" not in err_text and "does not exist" not in err_text:
             raise
 
-        id_candidates = [
-            _id_col,
-            "patient_id",
-            "patientid",
-            "uhid",
-            "pid",
-        ]
-        name_candidates = [
-            _name_col,
-            "patient_name",
-            "patientname",
-            "full_name",
-            "fullname",
-            "name",
-        ]
+        # First try to infer actual column names by sampling 1 row.
+        inferred_id: str | None = None
+        inferred_name: str | None = None
+        try:
+            probe = client.table(_patients_table).select("*").limit(1).execute()
+            probe_err = getattr(probe, "error", None)
+            if probe_err:
+                raise RuntimeError(str(probe_err))
+            probe_data = getattr(probe, "data", None)
+            if isinstance(probe_data, list) and probe_data and isinstance(probe_data[0], dict):
+                keys = [str(k) for k in probe_data[0].keys()]
+                keys_l = {k.lower(): k for k in keys}
 
-        last_err: Exception | None = None
-        data = None
-        for cid in id_candidates:
-            for cname in name_candidates:
-                if not cid or not cname:
-                    continue
-                try:
-                    data = _run(cid, cname)
-                    # If we got data successfully, switch output mapping to these columns.
-                    _id_col = cid
-                    _name_col = cname
-                    last_err = None
+                # Heuristics: prefer exact matches, else keys containing patient+id/name.
+                for cand in ["id", "patient_id", "patientid", "uhid", "pid", "patient id"]:
+                    if cand in keys_l:
+                        inferred_id = keys_l[cand]
+                        break
+                for cand in ["name", "patient_name", "patientname", "full_name", "fullname", "patient name"]:
+                    if cand in keys_l:
+                        inferred_name = keys_l[cand]
+                        break
+        except Exception:
+            inferred_id = None
+            inferred_name = None
+
+        if inferred_id and inferred_name:
+            data = _run(inferred_id, inferred_name, server_filter=_is_simple_ident(inferred_name))
+            _id_col, _name_col = inferred_id, inferred_name
+        else:
+            # Fall back to trying a broader set of common column names.
+            id_candidates = [
+                _id_col,
+                "id",
+                "ID",
+                "patient_id",
+                "patientId",
+                "patientid",
+                "uhid",
+                "UHID",
+                "pid",
+                "PID",
+                "patient id",
+                "Patient ID",
+            ]
+            name_candidates = [
+                _name_col,
+                "name",
+                "NAME",
+                "patient_name",
+                "patientName",
+                "patientname",
+                "full_name",
+                "fullName",
+                "fullname",
+                "patient name",
+                "Patient Name",
+            ]
+
+            last_err: Exception | None = None
+            data = None
+            for cid in id_candidates:
+                for cname in name_candidates:
+                    if not cid or not cname:
+                        continue
+                    try:
+                        data = _run(cid, cname, server_filter=_is_simple_ident(cname))
+                        _id_col = cid
+                        _name_col = cname
+                        last_err = None
+                        break
+                    except Exception as inner:
+                        last_err = inner
+                        continue
+                if last_err is None and data is not None:
                     break
-                except Exception as inner:
-                    last_err = inner
-                    continue
-            if last_err is None and data is not None:
-                break
-        if data is None:
-            raise last_err if last_err is not None else e
+            if data is None:
+                raise last_err if last_err is not None else e
 
     if not isinstance(data, list):
         return []
@@ -891,6 +950,11 @@ def search_patients_from_supabase(
         if pid is None or name is None:
             continue
         out.append({"id": str(pid), "name": str(name)})
+
+    # If we couldn't do server-side filtering (e.g., quoted column names), filter locally.
+    if q and out:
+        ql = q.lower()
+        out = [p for p in out if ql in str(p.get("name", "")).lower()]
     return out
 
 
