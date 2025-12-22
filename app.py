@@ -2009,16 +2009,33 @@ with col_del_pick:
 
         if option_map:
             # Use a visible sentinel option instead of `placeholder` for wider Streamlit compatibility.
+            # Also: guard against Streamlit selectbox failing when the previously selected value
+            # is no longer present in the new options list (common after edits/deletes).
             sentinel = "Select row to delete…"
+            options = [sentinel] + sorted(option_map.keys())
+
+            prev_choice = st.session_state.get("delete_row_select")
+            if prev_choice not in options:
+                st.session_state["delete_row_select"] = sentinel
+                st.session_state.delete_row_id = ""
+
             chosen = st.selectbox(
                 "Delete row",
-                options=[sentinel] + sorted(option_map.keys()),
+                options=options,
                 key="delete_row_select",
                 label_visibility="collapsed",
             )
             if chosen and chosen != sentinel:
                 st.session_state.delete_row_id = option_map.get(chosen, "")
+            else:
+                st.session_state.delete_row_id = ""
         else:
+            # Clear any stale selection if there are no candidates.
+            try:
+                st.session_state["delete_row_select"] = ""
+            except Exception:
+                pass
+            st.session_state.delete_row_id = ""
             st.caption("Delete row")
     except Exception:
         # Keep dashboard usable even if data is incomplete
