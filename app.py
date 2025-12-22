@@ -1930,7 +1930,7 @@ if "selected_patient_name" not in st.session_state:
     st.session_state.selected_patient_name = ""
 
 with col_add:
-    if st.button("➕ Add Patient", width="stretch"):
+    if st.button("➕", key="add_patient_btn", help="Add patient row"):
         # Create a new empty row
         new_row = {
             "Patient ID": str(st.session_state.selected_patient_id or "").strip(),
@@ -1959,7 +1959,7 @@ with col_add:
         st.rerun()
 
 with col_save:
-    if st.button("💾 Save", width="stretch", key="manual_save_btn"):
+    if st.button("💾", key="manual_save_btn", help="Save changes"):
         try:
             # Manually save current data
             save_data(df_raw, message="Data saved successfully!")
@@ -2009,10 +2009,10 @@ with col_del_pick:
                         st.session_state.delete_row_id = rid
                         break
         else:
-            st.caption("Delete row")
+            st.caption("")
     except Exception:
         # Keep dashboard usable even if data is incomplete
-        st.caption("Delete row")
+        st.caption("")
 
 with col_del_btn:
     if st.button("🗑️", key="delete_row_btn", help="Delete selected row"):
