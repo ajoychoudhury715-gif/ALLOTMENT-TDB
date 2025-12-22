@@ -1980,7 +1980,7 @@ with col_del_pick:
             & (candidates.get("REMINDER_ROW_ID", "").astype(str).str.strip() != "")
         ]
 
-        delete_options = []
+        option_map: dict[str, str] = {}
         if not candidates.empty:
             for _, r in candidates.iterrows():
                 rid = str(r.get("REMINDER_ROW_ID", "")).strip()
@@ -1990,29 +1990,28 @@ with col_del_pick:
                 in_t = str(r.get("In Time", "")).strip()
                 op = str(r.get("OP", "")).strip()
                 label = " · ".join([p for p in [pname, in_t, op] if p])
-                delete_options.append((label, rid))
+                # Make option text unique even if labels repeat.
+                opt = f"{label} — {rid[:8]}" if label else rid[:8]
+                option_map[opt] = rid
 
         if "delete_row_id" not in st.session_state:
             st.session_state.delete_row_id = ""
 
-        if delete_options:
+        if option_map:
             chosen = st.selectbox(
                 "Delete row",
-                options=[""] + [f"{lbl}" for (lbl, _) in delete_options],
+                options=[""] + sorted(option_map.keys()),
                 key="delete_row_select",
                 label_visibility="collapsed",
                 placeholder="Delete row…",
             )
             if chosen:
-                for lbl, rid in delete_options:
-                    if lbl == chosen:
-                        st.session_state.delete_row_id = rid
-                        break
+                st.session_state.delete_row_id = option_map.get(chosen, "")
         else:
-            st.caption("")
+            st.caption("Delete row")
     except Exception:
         # Keep dashboard usable even if data is incomplete
-        st.caption("")
+        st.caption("Delete row")
 
 with col_del_btn:
     if st.button("🗑️", key="delete_row_btn", help="Delete selected row"):
@@ -2024,8 +2023,19 @@ with col_del_btn:
                 if "REMINDER_ROW_ID" not in df_raw.columns:
                     raise ValueError("Missing REMINDER_ROW_ID column")
                 df_updated = df_raw[df_raw["REMINDER_ROW_ID"].astype(str) != rid].copy()
+
+                # Clear local reminder state for this row id.
+                try:
+                    if "snoozed" in st.session_state and rid in st.session_state.snoozed:
+                        del st.session_state.snoozed[rid]
+                    if "reminder_sent" in st.session_state:
+                        st.session_state.reminder_sent.discard(rid)
+                except Exception:
+                    pass
+
                 save_data(df_updated, message="Row deleted")
                 st.session_state.delete_row_id = ""
+                st.session_state.delete_row_select = ""
                 st.rerun()
             except Exception as e:
                 st.error(f"Error deleting row: {e}")
