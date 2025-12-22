@@ -14,8 +14,16 @@ A **Streamlit-based real-time scheduling dashboard** for managing dental allotme
 - Beautiful gradient interfaces
 - Smooth animations and transitions
 - Professional table styling
-- Responsive layout
+- Responsive layout optimized for mobile devices
 - Loading screen with animated spinner
+
+📱 **Mobile Optimization**
+- Responsive design that works on phones and tablets
+- Horizontal scrolling tables for wide data
+- Touch-friendly buttons and controls
+- Collapsible sections to save screen space
+- Optimized font sizes and spacing for mobile
+- Logo and title stack vertically on mobile for better layout
 
 📊 **Data Management**
 - Excel integration (Putt Allotment.xlsx)
@@ -125,6 +133,13 @@ st_autorefresh(interval=60000, debounce=True, key="autorefresh")  # 60 seconds
 2. **Saving Changes** - Click "💾 Save" button (changes auto-save after edits)
 3. **Status Updates** - Use dropdown in STATUS column
 4. **Real-time Updates** - Dashboard refreshes automatically every 60 seconds
+
+### Mobile Usage
+- **Horizontal Scrolling** - Swipe left/right on tables to see all columns
+- **Collapsible Sections** - Tap section headers to expand/collapse content
+- **Touch Controls** - All buttons and dropdowns are optimized for touch
+- **Responsive Layout** - Interface automatically adjusts to screen size
+- **Logo Layout** - Logo appears above title on mobile for better visual hierarchy
 
 ## Troubleshooting
 
