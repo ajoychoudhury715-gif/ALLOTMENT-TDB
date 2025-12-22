@@ -50,7 +50,7 @@ COLORS = {
     "text_primary": "#111b26",    # Main text (dark)
     "text_secondary": "#99582f",  # Secondary text (brown)
     "button_bg": "#99582f",       # Button background (brown)
-    "button_text": "#f5f5f5",     # Button text (light)
+    "button_text": "#f9f9f9",     # Button text (light)
     "accent": "#c9bbb0",          # Accent color (beige)
     "success": "#10b981",         # Green for success
     "warning": "#f59e0b",         # Amber for warnings
@@ -337,7 +337,7 @@ st.markdown(
     
     /* Button Styling - Premium & Attractive */
     .stButton>button {{
-        background: linear-gradient(135deg, {COLORS['button_bg']} 0%, #7a4629 100%) !important;
+        background: linear-gradient(135deg, {COLORS['button_bg']} 0%, {COLORS['text_primary']} 160%) !important;
         color: {COLORS['button_text']} !important;
         border: none !important;
         border-radius: 8px !important;
@@ -352,7 +352,7 @@ st.markdown(
     }}
     
     .stButton>button:hover {{
-        background: linear-gradient(135deg, #7a4629 0%, {COLORS['button_bg']} 100%) !important;
+        background: linear-gradient(135deg, {COLORS['text_primary']} 0%, {COLORS['button_bg']} 100%) !important;
         transform: translateY(-4px) !important;
         box-shadow: 0 8px 25px rgba(153, 88, 47, 0.4) !important;
         letter-spacing: 1px !important;
@@ -539,7 +539,7 @@ st.markdown(
     
     /* Save button styling - aesthetic and smooth */
     button[key="manual_save_btn"] {{
-        background: linear-gradient(135deg, {COLORS['button_bg']} 0%, #7a4629 100%) !important;
+        background: linear-gradient(135deg, {COLORS['button_bg']} 0%, {COLORS['text_primary']} 160%) !important;
         color: {COLORS['button_text']} !important;
         border: none !important;
         border-radius: 6px !important;
@@ -550,7 +550,7 @@ st.markdown(
     }}
     
     button[key="manual_save_btn"]:hover {{
-        background: linear-gradient(135deg, #7a4629 0%, {COLORS['button_bg']} 100%) !important;
+        background: linear-gradient(135deg, {COLORS['text_primary']} 0%, {COLORS['button_bg']} 100%) !important;
         box-shadow: 0 4px 14px rgba(153, 88, 47, 0.4) !important;
         transform: translateY(-2px) !important;
     }}
