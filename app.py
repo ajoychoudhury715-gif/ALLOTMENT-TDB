@@ -644,6 +644,12 @@ now_epoch = int(time_module.time())
 with st.sidebar:
     st.markdown("## 🔔 Notifications")
     st.checkbox("Enable 15-minute reminders", value=True, key="enable_reminders")
+    st.checkbox(
+        "Pause auto-refresh while editing",
+        value=True,
+        key="pause_autorefresh_while_editing",
+        help="Keeps the table stable while you edit (recommended).",
+    )
     st.selectbox(
         "Default snooze (seconds)",
         options=[30, 60, 90, 120, 150, 180, 300],
@@ -1385,8 +1391,37 @@ def save_data_to_gsheets(worksheet, df):
         st.error(f"Error saving to Google Sheets: {e}")
         return False
 
-# Auto-refresh every 30 seconds to support 30-second snoozes
-st_autorefresh(interval=30000, debounce=True, key="autorefresh")
+def _data_editor_has_pending_edits(editor_key: str) -> bool:
+    """Detect pending edits without touching widget state.
+
+    Streamlit stores data_editor widget edits in st.session_state[editor_key]
+    as a dict with keys like edited_rows/added_rows/deleted_rows.
+    """
+    try:
+        state = st.session_state.get(editor_key)
+        if not isinstance(state, dict):
+            return False
+        return bool(state.get("edited_rows") or state.get("added_rows") or state.get("deleted_rows"))
+    except Exception:
+        return False
+
+
+def _should_pause_autorefresh_for_editing() -> bool:
+    keys: list[str] = ["full_schedule_editor", "doctor_editor"]
+    # OP editors are dynamic keys like op_OP_1_editor, etc.
+    for k in st.session_state.keys():
+        if isinstance(k, str) and k.startswith("op_") and k.endswith("_editor"):
+            keys.append(k)
+    return any(_data_editor_has_pending_edits(k) for k in keys)
+
+
+# Auto-refresh every 30 seconds to support 30-second snoozes.
+# Pause while editing so the table stays stable and doesn't interrupt typing.
+_pause_autorefresh = bool(st.session_state.get("pause_autorefresh_while_editing", True)) and _should_pause_autorefresh_for_editing()
+if _pause_autorefresh:
+    st.caption("⏸ Auto-refresh paused while editing")
+else:
+    st_autorefresh(interval=30000, debounce=True, key="autorefresh")
 
 # ================ Load Data ================
 df_raw = None
