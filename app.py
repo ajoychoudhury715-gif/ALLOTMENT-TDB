@@ -1921,7 +1921,7 @@ def highlight_row(row):
 st.markdown("### 📅 Full Today's Schedule")
 
 # Add new patient button and save button
-col_add, col_save, col_del_pick, col_del_btn, col_search = st.columns([0.15, 0.15, 0.18, 0.07, 0.45])
+col_add, col_save, col_del_pick, col_del_btn, col_search = st.columns([0.20, 0.16, 0.18, 0.07, 0.39])
 
 # Selected patient from external patient DB (optional)
 if "selected_patient_id" not in st.session_state:
@@ -1930,7 +1930,12 @@ if "selected_patient_name" not in st.session_state:
     st.session_state.selected_patient_name = ""
 
 with col_add:
-    if st.button("➕", key="add_patient_btn", help="Add patient row"):
+    if st.button(
+        "➕ Add Patient",
+        key="add_patient_btn",
+        help="Add a new patient row (uses selected patient if chosen)",
+        use_container_width=True,
+    ):
         # Create a new empty row
         new_row = {
             "Patient ID": str(st.session_state.selected_patient_id or "").strip(),
@@ -1959,7 +1964,12 @@ with col_add:
         st.rerun()
 
 with col_save:
-    if st.button("💾", key="manual_save_btn", help="Save changes"):
+    if st.button(
+        "💾 Save",
+        key="manual_save_btn",
+        help="Save changes to storage",
+        use_container_width=True,
+    ):
         try:
             # Manually save current data
             save_data(df_raw, message="Data saved successfully!")
