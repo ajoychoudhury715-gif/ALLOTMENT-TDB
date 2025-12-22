@@ -827,7 +827,25 @@ if GSHEETS_AVAILABLE:
         except Exception:
             pass
 
-        st.sidebar.error(f"⚠️ Google Sheets connection failed: {msg}{hint}{diag_text}")
+        # Safe view of which *secret keys* Streamlit can see (names only, no values)
+        secrets_keys_text = ""
+        try:
+            if hasattr(st, 'secrets'):
+                keys = sorted(list(st.secrets.keys()))
+                # Avoid dumping a huge list; this app only cares about these.
+                interesting = [
+                    "spreadsheet_url",
+                    "gcp_service_account",
+                    "gcp_service_account_json",
+                ]
+                present = {k: (k in st.secrets) for k in interesting}
+                secrets_keys_text = "\n\nSecrets keys (safe): " + ", ".join([f"{k}={v}" for k, v in present.items()])
+            else:
+                secrets_keys_text = "\n\nSecrets keys (safe): st.secrets not available"
+        except Exception:
+            pass
+
+        st.sidebar.error(f"⚠️ Google Sheets connection failed: {msg}{hint}{diag_text}{secrets_keys_text}")
         USE_GOOGLE_SHEETS = False
 
         # Simple guided help (no secrets displayed)
@@ -903,7 +921,23 @@ if GSHEETS_AVAILABLE:
                 _ = _ws.row_values(1)
                 st.sidebar.success("✅ Test OK: connected and read the sheet")
             except Exception as test_e:
-                st.sidebar.error(f"❌ Test failed: {test_e}")
+                # Add safe view of which secret keys exist to help diagnose missing secrets.
+                try:
+                    if hasattr(st, 'secrets'):
+                        interesting = [
+                            "spreadsheet_url",
+                            "gcp_service_account",
+                            "gcp_service_account_json",
+                        ]
+                        present = {k: (k in st.secrets) for k in interesting}
+                        st.sidebar.error(
+                            f"❌ Test failed: {test_e}\n\nSecrets keys (safe): "
+                            + ", ".join([f"{k}={v}" for k, v in present.items()])
+                        )
+                    else:
+                        st.sidebar.error(f"❌ Test failed: {test_e}\n\nSecrets keys (safe): st.secrets not available")
+                except Exception:
+                    st.sidebar.error(f"❌ Test failed: {test_e}")
 
 # Helper functions for Google Sheets
 @st.cache_data(ttl=30)  # Cache for 30 seconds to reduce API calls
