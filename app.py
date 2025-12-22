@@ -662,20 +662,34 @@ def _get_service_account_info_from_secrets(secrets_obj) -> dict:
         if isinstance(sa, str):
             try:
                 return json.loads(sa)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    "`gcp_service_account` is present but is not a TOML table/dict and is not valid JSON. "
+                    f"JSON error at line {e.lineno}, column {e.colno}: {e.msg}. "
+                    "Prefer using a TOML table: [gcp_service_account]."
+                ) from e
             except Exception as e:
                 raise ValueError(
-                    "`gcp_service_account` is present but is not a table/dict and is not valid JSON. "
-                    "Prefer using a TOML table: [gcp_service_account]."
+                    "`gcp_service_account` is present but could not be parsed. Prefer using a TOML table: [gcp_service_account]."
                 ) from e
 
     if "gcp_service_account_json" in secrets_obj:
         sa_json = secrets_obj.get("gcp_service_account_json")
+        # Some users paste an inline TOML table instead of a JSON string; Streamlit may parse it as a dict.
+        if isinstance(sa_json, dict):
+            return sa_json
         if isinstance(sa_json, str) and sa_json.strip():
             try:
                 return json.loads(sa_json)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    "`gcp_service_account_json` is not valid JSON. "
+                    f"JSON error at line {e.lineno}, column {e.colno}: {e.msg}. "
+                    "Fix common issues: use double-quotes, remove trailing commas, keep the outer { } braces."
+                ) from e
             except Exception as e:
                 raise ValueError(
-                    "`gcp_service_account_json` is not valid JSON. Paste the full service account JSON exactly."
+                    "`gcp_service_account_json` could not be parsed. Paste the full service account JSON exactly."
                 ) from e
 
     raise ValueError(
