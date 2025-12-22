@@ -45,5 +45,12 @@ Thumbs.db
 # Streamlit
 .streamlit/
 
+# Allow example secrets template to be tracked
+!.streamlit/
+!.streamlit/secrets.toml.example
+
+# Never commit real secrets
+.streamlit/secrets.toml
+
 # Cache
 .cache/
