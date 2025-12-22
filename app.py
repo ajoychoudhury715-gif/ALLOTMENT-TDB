@@ -1827,21 +1827,43 @@ with col3:
             sup_url, sup_key, _, _ = _get_supabase_config_from_secrets_or_env()
             patients_table, id_col, name_col = _get_patients_config_from_secrets_or_env()
 
-            patient_query = st.text_input("Search patient", value="", key="patient_search")
-            results = search_patients_from_supabase(
-                sup_url, sup_key, patients_table, id_col, name_col, patient_query, 50
+            patient_query = st.text_input(
+                "Search patient name",
+                value="",
+                key="patient_search",
+                help="Type a name and press Enter (or click outside) to refresh results.",
             )
-            options = [(p["id"], p["name"]) for p in results]
-            if options:
-                chosen = st.selectbox(
-                    "Select patient",
-                    options=options,
-                    format_func=lambda x: f"{x[0]} - {x[1]}",
+
+            q = str(patient_query or "").strip()
+            results = (
+                search_patients_from_supabase(
+                    sup_url, sup_key, patients_table, id_col, name_col, q, 50
+                )
+                if q
+                else []
+            )
+
+            if results:
+                # Use string options with a blank first choice so Streamlit doesn't auto-select a patient.
+                option_map = {f"{p['id']} - {p['name']}": (p["id"], p["name"]) for p in results}
+                option_strings = [""] + list(option_map.keys())
+
+                chosen_str = st.selectbox(
+                    "Matches",
+                    options=option_strings,
                     key="patient_select",
                 )
-                if chosen:
-                    st.session_state.selected_patient_id = chosen[0]
-                    st.session_state.selected_patient_name = chosen[1]
+                if chosen_str and chosen_str in option_map:
+                    pid, pname = option_map[chosen_str]
+                    st.session_state.selected_patient_id = str(pid)
+                    st.session_state.selected_patient_name = str(pname)
+            elif q:
+                st.caption("No matches")
+
+            if st.session_state.selected_patient_id or st.session_state.selected_patient_name:
+                st.caption(
+                    f"Selected: {st.session_state.selected_patient_id} - {st.session_state.selected_patient_name}"
+                )
         except Exception:
             # If patient DB isn't configured, keep manual entry flow.
             pass
