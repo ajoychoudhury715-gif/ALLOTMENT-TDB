@@ -1724,8 +1724,8 @@ for col in ["Patient Name", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CAS
         display_all[col] = display_all[col].astype(str).replace('nan', '')
 
 # Keep In Time and Out Time as time objects for proper display
-display_all["In Time"] = display_all["In Time"].fillna(pd.NaT)
-display_all["Out Time"] = display_all["Out Time"].fillna(pd.NaT)
+display_all["In Time"] = display_all["In Time"].apply(lambda v: v if isinstance(v, time) else None)
+display_all["Out Time"] = display_all["Out Time"].apply(lambda v: v if isinstance(v, time) else None)
 
 edited_all = st.data_editor(
     display_all, 
@@ -1877,10 +1877,12 @@ if unique_ops:
             op_df = df[df["OP"] == op]
             display_op = op_df[["Patient Name", "In Time Obj", "Out Time Obj", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "SUCTION", "CLEANING", "STATUS"]].copy()
             display_op = display_op.rename(columns={"In Time Obj": "In Time", "Out Time Obj": "Out Time"})
+            # Preserve original index for mapping edits back to df_raw
+            display_op["_orig_idx"] = display_op.index
             display_op = display_op.reset_index(drop=True)
-            # Ensure time objects are preserved
-            display_op["In Time"] = display_op["In Time"].fillna(pd.NaT)
-            display_op["Out Time"] = display_op["Out Time"].fillna(pd.NaT)
+            # Ensure time objects are preserved; Streamlit TimeColumn edits best with None for missing
+            display_op["In Time"] = display_op["In Time"].apply(lambda v: v if isinstance(v, time) else None)
+            display_op["Out Time"] = display_op["Out Time"].apply(lambda v: v if isinstance(v, time) else None)
             
             edited_op = st.data_editor(
                 display_op, 
@@ -1888,6 +1890,7 @@ if unique_ops:
                 key=f"op_{str(op).replace(' ', '_')}_editor", 
                 hide_index=True,
                 column_config={
+                    "_orig_idx": None,
                     "In Time": st.column_config.TimeColumn(label="In Time", format="hh:mm A"),
                     "Out Time": st.column_config.TimeColumn(label="Out Time", format="hh:mm A"),
                     "DR.": st.column_config.SelectboxColumn(
@@ -1927,6 +1930,77 @@ if unique_ops:
                     )
                 }
             )
+
+            # Persist edits from OP tabs (previously this editor had no save path)
+            if edited_op is not None:
+                op_has_changes = False
+                if not edited_op.equals(display_op):
+                    for col in edited_op.columns:
+                        if col not in ["In Time", "Out Time", "_orig_idx"]:
+                            if not (edited_op[col] == display_op[col]).all():
+                                op_has_changes = True
+                                break
+                    if not op_has_changes:
+                        for col in ["In Time", "Out Time"]:
+                            if col in edited_op.columns:
+                                edited_times = edited_op[col].astype(str)
+                                display_times = display_op[col].astype(str)
+                                if not (edited_times == display_times).all():
+                                    op_has_changes = True
+                                    break
+
+                if op_has_changes:
+                    try:
+                        df_updated = df_raw.copy()
+                        for _, row in edited_op.iterrows():
+                            orig_idx = row.get("_orig_idx")
+                            if pd.isna(orig_idx):
+                                continue
+                            orig_idx = int(orig_idx)
+                            if orig_idx < 0 or orig_idx >= len(df_updated):
+                                continue
+
+                            # Patient Name
+                            patient_name = str(row.get("Patient Name", "")).strip()
+                            if patient_name == "":
+                                for c in df_updated.columns:
+                                    df_updated.iloc[orig_idx, df_updated.columns.get_loc(c)] = ""
+                                continue
+                            if "Patient Name" in df_updated.columns:
+                                df_updated.iloc[orig_idx, df_updated.columns.get_loc("Patient Name")] = patient_name
+
+                            # Times -> canonical HH:MM strings
+                            if "In Time" in df_updated.columns:
+                                t = _coerce_to_time_obj(row.get("In Time"))
+                                df_updated.iloc[orig_idx, df_updated.columns.get_loc("In Time")] = (
+                                    f"{t.hour:02d}:{t.minute:02d}" if t is not None else ""
+                                )
+                            if "Out Time" in df_updated.columns:
+                                t = _coerce_to_time_obj(row.get("Out Time"))
+                                df_updated.iloc[orig_idx, df_updated.columns.get_loc("Out Time")] = (
+                                    f"{t.hour:02d}:{t.minute:02d}" if t is not None else ""
+                                )
+
+                            for c in ["Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "STATUS"]:
+                                if c in row.index and c in df_updated.columns:
+                                    val = row.get(c)
+                                    clean_val = str(val).strip() if val and str(val) != "nan" else ""
+                                    df_updated.iloc[orig_idx, df_updated.columns.get_loc(c)] = clean_val
+
+                            for c in ["SUCTION", "CLEANING"]:
+                                if c in row.index and c in df_updated.columns:
+                                    val = row.get(c)
+                                    if pd.isna(val) or val is None or val is False:
+                                        df_updated.iloc[orig_idx, df_updated.columns.get_loc(c)] = ""
+                                    elif val is True:
+                                        df_updated.iloc[orig_idx, df_updated.columns.get_loc(c)] = "✓"
+                                    else:
+                                        df_updated.iloc[orig_idx, df_updated.columns.get_loc(c)] = ""
+
+                        save_data(df_updated, message=f"Schedule updated for {op}!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error saving {op} edits: {e}")
 else:
     st.info("No chair data available.")
 
