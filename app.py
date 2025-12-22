@@ -355,6 +355,22 @@ st.markdown(
         outline: none !important;
         box-shadow: 0 0 0 3px rgba(153, 88, 47, 0.2) !important;
     }}
+
+    /* Targeted hover animation: Add Patient + Save only (via unique tooltip/title) */
+    button[title="Add a new patient row (uses selected patient if chosen)"] {{
+        position: relative !important;
+        overflow: hidden !important;
+    }}
+
+    button[title="Save changes to storage"] {{
+        position: relative !important;
+        overflow: hidden !important;
+    }}
+
+    button[title="Add a new patient row (uses selected patient if chosen)"]:hover,
+    button[title="Save changes to storage"]:hover {{
+        animation: pulse-glow 1.4s ease-out infinite !important;
+    }}
     
     .st-bv, .st-cv, .st-cw {{
         background-color: {COLORS['bg_secondary']} !important;
