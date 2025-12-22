@@ -592,11 +592,19 @@ IST = timezone(timedelta(hours=5, minutes=30))
 now = datetime.now(IST)
 st.markdown(f" {now.strftime('%B %d, %Y - %I:%M:%S %p')} IST")
 
+# Epoch seconds (used for 30-second snooze timing)
+now_epoch = int(time_module.time())
+
 # --- Reminder settings in sidebar ---
 with st.sidebar:
     st.markdown("## 🔔 Notifications")
     st.checkbox("Enable 15-minute reminders", value=True, key="enable_reminders")
-    st.selectbox("Default snooze (minutes)", options=[5,10,15,30], index=0, key="default_snooze")
+    st.selectbox(
+        "Default snooze (seconds)",
+        options=[30, 60, 90, 120, 150, 180, 300],
+        index=0,
+        key="default_snooze_seconds",
+    )
     st.write("💡 Reminders alert 15 minutes before a patient's In Time.")
 
 # ================ Data Storage Configuration ================
@@ -1165,8 +1173,8 @@ def save_data_to_gsheets(worksheet, df):
         st.error(f"Error saving to Google Sheets: {e}")
         return False
 
-# Auto-refresh every 60 seconds (with countdown visible)
-st_autorefresh(interval=60000, debounce=True, key="autorefresh")
+# Auto-refresh every 30 seconds to support 30-second snoozes
+st_autorefresh(interval=30000, debounce=True, key="autorefresh")
 
 # ================ Load Data ================
 df_raw = None
@@ -1479,16 +1487,38 @@ if 'prev_hash' not in st.session_state:
     st.session_state.prev_upcoming = set()
     st.session_state.prev_raw = pd.DataFrame()
     st.session_state.reminder_sent = set()  # Track reminders by row ID
-    st.session_state.snoozed = {}  # Map row_id -> snooze_until_min
+    st.session_state.snoozed = {}  # Map row_id -> snooze_until_epoch_seconds
 
-# Load persisted reminders from Excel
+# Load persisted reminders from storage
 for idx, row in df_raw.iterrows():
     try:
         row_id = row.get('REMINDER_ROW_ID')
         if pd.notna(row_id):
-            until = row.get('REMINDER_SNOOZE_UNTIL')
-            if pd.notna(until) and int(until) > current_min:
-                st.session_state.snoozed[row_id] = int(until)
+            until_raw = row.get('REMINDER_SNOOZE_UNTIL')
+            until_epoch = None
+            if pd.notna(until_raw) and until_raw != "":
+                try:
+                    # Normalize numeric strings
+                    if isinstance(until_raw, str) and until_raw.strip().isdigit():
+                        until_raw = int(until_raw.strip())
+
+                    if isinstance(until_raw, (int, float)):
+                        val = int(until_raw)
+                        # Legacy values were stored as minutes since midnight (small numbers)
+                        if val < 100000:
+                            midnight_ist = datetime(now.year, now.month, now.day, tzinfo=IST)
+                            until_epoch = int(midnight_ist.timestamp()) + (val * 60)
+                        else:
+                            until_epoch = val
+                    elif isinstance(until_raw, str):
+                        s = until_raw.strip().replace("Z", "+00:00")
+                        dt = datetime.fromisoformat(s)
+                        until_epoch = int(dt.timestamp())
+                except Exception:
+                    until_epoch = None
+
+            if until_epoch is not None and until_epoch > now_epoch:
+                st.session_state.snoozed[row_id] = until_epoch
             dismissed = row.get('REMINDER_DISMISSED')
             if str(dismissed).strip().upper() in ['TRUE','1','T','YES']:
                 st.session_state.reminder_sent.add(row_id)
@@ -1546,7 +1576,7 @@ for patient in new_upcoming:
 # ================ 15-Minute Reminder System ================
 if st.session_state.get("enable_reminders", True):
     # Clean up expired snoozes
-    expired = [rid for rid, until in list(st.session_state.snoozed.items()) if until <= current_min]
+    expired = [rid for rid, until in list(st.session_state.snoozed.items()) if until <= now_epoch]
     for rid in expired:
         del st.session_state.snoozed[rid]
         _persist_reminder_to_storage(rid, None, False)
@@ -1567,8 +1597,9 @@ if st.session_state.get("enable_reminders", True):
         patient = row.get("Patient Name", "Unknown")
         mins_left = int(row["In_min"] - current_min)
         
-        # Skip if snoozed or already reminded
-        if row_id in st.session_state.snoozed or row_id in st.session_state.reminder_sent:
+        # Skip if snoozed (still active) or already reminded
+        snooze_until = st.session_state.snoozed.get(row_id)
+        if (snooze_until is not None and snooze_until > now_epoch) or (row_id in st.session_state.reminder_sent):
             continue
 
         assistants = ", ".join(
@@ -1623,29 +1654,29 @@ if st.session_state.get("enable_reminders", True):
                     f"**{patient}** — {row.get('Procedure','')} (in ~{mins_left} min at {row.get('In Time Str','')}){assistants_text}"
                 )  
                 
-                default_snooze = int(st.session_state.get("default_snooze", 5))
-                if col2.button(f"💤 {default_snooze}min", key=f"snooze_{_safe_key(row_id)}_default"):
-                    until = current_min + default_snooze
+                default_snooze_seconds = int(st.session_state.get("default_snooze_seconds", 30))
+                if col2.button(f"💤 {default_snooze_seconds}s", key=f"snooze_{_safe_key(row_id)}_default"):
+                    until = now_epoch + default_snooze_seconds
                     st.session_state.snoozed[row_id] = until
                     st.session_state.reminder_sent.discard(row_id)
                     _persist_reminder_to_storage(row_id, until, False)
-                    st.toast(f"😴 Snoozed {patient} for {default_snooze} min", icon="💤")
+                    st.toast(f"😴 Snoozed {patient} for {default_snooze_seconds} sec", icon="💤")
                     st.rerun()
                     
-                if col3.button("💤 5", key=f"snooze_{_safe_key(row_id)}_5"):
-                    until = current_min + 5
+                if col3.button("💤 30s", key=f"snooze_{_safe_key(row_id)}_30s"):
+                    until = now_epoch + 30
                     st.session_state.snoozed[row_id] = until
                     st.session_state.reminder_sent.discard(row_id)
                     _persist_reminder_to_storage(row_id, until, False)
-                    st.toast(f"😴 Snoozed {patient} for 5 min", icon="💤")
+                    st.toast(f"😴 Snoozed {patient} for 30 sec", icon="💤")
                     st.rerun()
                     
-                if col4.button("💤 10", key=f"snooze_{_safe_key(row_id)}_10"):
-                    until = current_min + 10
+                if col4.button("💤 60s", key=f"snooze_{_safe_key(row_id)}_60s"):
+                    until = now_epoch + 60
                     st.session_state.snoozed[row_id] = until
                     st.session_state.reminder_sent.discard(row_id)
                     _persist_reminder_to_storage(row_id, until, False)
-                    st.toast(f"😴 Snoozed {patient} for 10 min", icon="💤")
+                    st.toast(f"😴 Snoozed {patient} for 60 sec", icon="💤")
                     st.rerun()
                     
                 if col5.button("🗑️", key=f"dismiss_{_safe_key(row_id)}"):
@@ -1659,13 +1690,13 @@ if st.session_state.get("enable_reminders", True):
                 st.markdown("---")
                 st.markdown("**Snoozed Reminders**")
                 for row_id, until in list(st.session_state.snoozed.items()):
-                    remaining = until - current_min
-                    if remaining > 0:
+                    remaining_sec = int(until - now_epoch)
+                    if remaining_sec > 0:
                         match_row = df[df.get('REMINDER_ROW_ID') == row_id]
                         if not match_row.empty:
                             name = match_row.iloc[0].get('Patient Name', row_id)
                             c1, c2 = st.columns([4,1])
-                            c1.write(f"🕐 {name} — {remaining} min remaining")
+                            c1.write(f"🕐 {name} — {remaining_sec} sec remaining")
                             if c2.button("Cancel", key=f"cancel_{_safe_key(row_id)}"):
                                 del st.session_state.snoozed[row_id]
                                 _persist_reminder_to_storage(row_id, None, False)
