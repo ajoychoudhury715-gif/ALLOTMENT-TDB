@@ -586,13 +586,49 @@ USE_GOOGLE_SHEETS = False
 gsheet_client = None
 gsheet_worksheet = None
 
+
+def _normalize_service_account_info(raw_info: dict) -> dict:
+    """Normalize Streamlit secrets into a dict suitable for google-auth.
+
+    Streamlit secrets are often pasted with either literal "\n" sequences or
+    TOML multiline strings. This normalizes the private key so google-auth can
+    parse it reliably.
+    """
+    info = dict(raw_info or {})
+    private_key = info.get("private_key")
+    if isinstance(private_key, str):
+        # Strip surrounding whitespace
+        private_key = private_key.strip()
+        # Convert escaped newlines into real newlines if needed
+        if "\\n" in private_key and "\n" not in private_key:
+            private_key = private_key.replace("\\n", "\n")
+        # Normalize Windows newlines
+        private_key = private_key.replace("\r\n", "\n").replace("\r", "\n")
+        # Remove accidental leading/trailing quotes from copy/paste
+        if (private_key.startswith('"') and private_key.endswith('"')) or (
+            private_key.startswith("'") and private_key.endswith("'")
+        ):
+            private_key = private_key[1:-1]
+        info["private_key"] = private_key
+    return info
+
 # Try to connect to Google Sheets if credentials are available
 if GSHEETS_AVAILABLE:
     try:
         # Check if running on Streamlit Cloud with secrets
         if hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
+            service_account_info = _normalize_service_account_info(st.secrets["gcp_service_account"])
+
+            # Basic validation to provide clearer errors than "Invalid base64..."
+            pk = str(service_account_info.get("private_key", ""))
+            if "BEGIN PRIVATE KEY" not in pk or "END PRIVATE KEY" not in pk:
+                raise ValueError(
+                    "Service account private_key is missing BEGIN/END markers. "
+                    "In Streamlit secrets, paste it as a TOML multiline string using triple quotes (\"\"\")."
+                )
+
             credentials = Credentials.from_service_account_info(
-                st.secrets["gcp_service_account"],
+                service_account_info,
                 scopes=[
                     "https://www.googleapis.com/auth/spreadsheets",
                     "https://www.googleapis.com/auth/drive"
@@ -608,7 +644,16 @@ if GSHEETS_AVAILABLE:
                 USE_GOOGLE_SHEETS = True
                 st.sidebar.success("☁️ Connected to Google Sheets")
     except Exception as e:
-        st.sidebar.warning(f"⚠️ Google Sheets connection failed: {str(e)[:50]}...")
+        # Show a more actionable hint for the most common failure mode.
+        msg = str(e)
+        hint = ""
+        if "Invalid base64" in msg or "base64" in msg.lower():
+            hint = (
+                "\n\nHint: This usually means the service account `private_key` was pasted with broken newlines "
+                "or an extra character. Re-download a NEW JSON key from Google Cloud and paste the `private_key` "
+                "using TOML triple quotes (\"\"\")."
+            )
+        st.sidebar.error(f"⚠️ Google Sheets connection failed: {msg}{hint}")
         USE_GOOGLE_SHEETS = False
 
 # Helper functions for Google Sheets
