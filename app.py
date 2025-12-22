@@ -2181,7 +2181,7 @@ with col_search:
             )
 
 all_sorted = df
-display_all = all_sorted[["Patient ID", "Patient Name", "In Time Obj", "Out Time Obj", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "OP", "SUCTION", "CLEANING", "STATUS"]].copy()
+display_all = all_sorted[["Patient Name", "In Time Obj", "Out Time Obj", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "OP", "SUCTION", "CLEANING", "STATUS"]].copy()
 display_all = display_all.rename(columns={"In Time Obj": "In Time", "Out Time Obj": "Out Time"})
 # Preserve original index for mapping edits back to df_raw
 display_all["_orig_idx"] = display_all.index
@@ -2191,9 +2191,6 @@ display_all = display_all.reset_index(drop=True)
 for col in ["Patient Name", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "OP", "STATUS"]:
     if col in display_all.columns:
         display_all[col] = display_all[col].astype(str).replace('nan', '')
-
-if "Patient ID" in display_all.columns:
-    display_all["Patient ID"] = display_all["Patient ID"].astype(str).replace('nan', '')
 
 # Keep In Time and Out Time as time objects for proper display
 display_all["In Time"] = display_all["In Time"].apply(lambda v: v if isinstance(v, time) else None)
@@ -2206,7 +2203,6 @@ edited_all = st.data_editor(
     hide_index=True,
     column_config={
         "_orig_idx": None,  # Hide the original index column
-        "Patient ID": st.column_config.TextColumn(label="Patient ID"),
         "Patient Name": st.column_config.TextColumn(label="Patient Name"),
         "In Time": st.column_config.TimeColumn(label="In Time", format="hh:mm A"),
         "Out Time": st.column_config.TimeColumn(label="Out Time", format="hh:mm A"),
