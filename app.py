@@ -1838,13 +1838,40 @@ with col3:
                 sup_url, sup_key, patients_table, id_col, name_col, q, 50
             )
         except Exception as e:
-            st.warning(
-                "Patient search is not connected. "
-                f"Error: {e}\n\n"
-                f"Check Supabase table/columns: {patients_table}({id_col}, {name_col}). "
-                "If you are using an anon key, RLS may block reads; add `supabase_service_role_key` in Secrets "
-                "or create an RLS policy for the patients table."
-            )
+            err_text = str(e)
+            st.error("Patient search is not connected.")
+            st.caption(f"Error: {err_text}")
+
+            # Common case: table doesn't exist yet.
+            if "PGRST205" in err_text or "Could not find the table" in err_text:
+                with st.expander("✅ Fix: Create the patients table", expanded=True):
+                    st.markdown(
+                        "Your Supabase project does not have the patient master table yet. "
+                        "Create it in Supabase → SQL Editor, then reload the app."
+                    )
+                    st.code(
+                        "create table if not exists patients (\n"
+                        "  id text primary key,\n"
+                        "  name text not null\n"
+                        ");\n\n"
+                        "create index if not exists patients_name_idx on patients (name);\n",
+                        language="sql",
+                    )
+                    st.markdown(
+                        "If your patient table/columns have different names, set these in Streamlit Secrets:"
+                    )
+                    st.code(
+                        "supabase_patients_table = \"patients\"\n"
+                        "supabase_patients_id_col = \"id\"\n"
+                        "supabase_patients_name_col = \"name\"\n",
+                        language="toml",
+                    )
+            else:
+                st.warning(
+                    f"Check Supabase table/columns: {patients_table}({id_col}, {name_col}). "
+                    "If you are using an anon key, RLS may block reads; add `supabase_service_role_key` in Secrets "
+                    "or create an RLS policy for the patients table."
+                )
             results = []
 
         if results:
