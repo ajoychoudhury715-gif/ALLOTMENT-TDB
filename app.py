@@ -1215,123 +1215,102 @@ df["Out Time"] = df["Out Time"]
 
 # Convert various time formats to HH:MM string
 def dec_to_time(time_value):
-    if pd.isna(time_value) or time_value == "":
+    t = _coerce_to_time_obj(time_value)
+    if t is None:
         return "N/A"
-    
+    return f"{t.hour:02d}:{t.minute:02d}"
+
+
+def _coerce_to_time_obj(time_value):
+    """Best-effort coercion of many time representations into a datetime.time.
+
+    Supports:
+    - datetime.time, datetime
+    - strings: HH:MM, HH:MM:SS, HH.MM, and 12-hour formats like '09:30 AM'
+    - numbers: 9.30 (meaning 09:30), or Excel serial time 0-1
+    """
+    if time_value is None or pd.isna(time_value) or time_value == "":
+        return None
+    if isinstance(time_value, time):
+        return time(time_value.hour, time_value.minute)
+    if isinstance(time_value, datetime):
+        return time(time_value.hour, time_value.minute)
+
+    # Strings
+    if isinstance(time_value, str):
+        s = " ".join(time_value.strip().split())
+        if s == "" or s.upper() in {"N/A", "NAT", "NONE"}:
+            return None
+
+        # 12-hour formats (e.g., 09:30 AM, 9:30PM, 09:30:00 PM)
+        if re.search(r"\b(AM|PM)\b", s, flags=re.IGNORECASE) or re.search(r"(AM|PM)$", s, flags=re.IGNORECASE):
+            s_norm = re.sub(r"\s*(AM|PM)\s*$", r" \1", s, flags=re.IGNORECASE).upper()
+            for fmt in ("%I:%M %p", "%I:%M:%S %p"):
+                try:
+                    dt = datetime.strptime(s_norm, fmt)
+                    return time(dt.hour, dt.minute)
+                except ValueError:
+                    pass
+
+        # HH:MM or HH:MM:SS
+        if ":" in s:
+            parts = s.split(":")
+            if len(parts) >= 2:
+                try:
+                    h = int(parts[0])
+                    m_part = re.sub(r"\D.*$", "", parts[1])
+                    m = int(m_part)
+                    if 0 <= h < 24 and 0 <= m < 60:
+                        return time(h, m)
+                except (ValueError, TypeError):
+                    pass
+
+        # HH.MM
+        if "." in s:
+            parts = s.split(".")
+            if len(parts) == 2:
+                try:
+                    h = int(parts[0])
+                    m = int(parts[1])
+                    if 0 <= h < 24 and 0 <= m < 60:
+                        return time(h, m)
+                except (ValueError, TypeError):
+                    pass
+
+        return None
+
+    # Numeric formats
     try:
-        # Handle datetime.time objects (from Excel/openpyxl reading time as datetime.time)
-        if isinstance(time_value, time):
-            return f"{time_value.hour:02d}:{time_value.minute:02d}"
-        
-        # Handle datetime objects (in case Excel interprets as datetime)
-        if isinstance(time_value, datetime):
-            return f"{time_value.hour:02d}:{time_value.minute:02d}"
-        
-        # If it's already a string in HH.MM or HH:MM format
-        if isinstance(time_value, str):
-            time_str = time_value.strip()
-            # Handle HH.MM format (from Excel)
-            if "." in time_str:
-                parts = time_str.split(".")
-                if len(parts) == 2:
-                    try:
-                        hours = int(parts[0])
-                        minutes = int(parts[1])
-                        return f"{hours:02d}:{minutes:02d}"
-                    except ValueError:
-                        pass
-            # Handle HH:MM format
-            if ":" in time_str:
-                parts = time_str.split(":")
-                if len(parts) == 2:
-                    try:
-                        hours = int(parts[0])
-                        minutes = int(parts[1])
-                        return f"{hours:02d}:{minutes:02d}"
-                    except ValueError:
-                        pass
-        
-        # Handle numeric formats (could be float or int)
-        try:
-            num_val = float(time_value)
-            # Check if it's a time value between 0-24 with decimal (like 9.30)
-            # IMPORTANT: The decimal part represents MINUTES directly (e.g., 9.30 = 9:30, NOT 9 + 0.30*60)
-            if 0 <= num_val < 24:
-                hours = int(num_val)
-                # Get decimal part - this IS the minutes (e.g., .30 = 30 minutes)
-                decimal_part = num_val - hours
-                # Multiply by 100 to get minutes directly (9.30 -> 0.30 -> 30 minutes)
-                minutes = round(decimal_part * 100)
-                if minutes >= 60:
-                    # If someone entered 9.75 meaning 9:45, handle both interpretations
-                    # Check if it looks like it was meant to be minutes (30, 45, etc.)
-                    if minutes <= 99:
-                        # It's likely meant as direct minutes (e.g., 9.30 = 9:30)
-                        pass
-                    else:
-                        # Fallback: treat as fractional hours
-                        minutes = round(decimal_part * 60)
-                if minutes >= 60:
-                    hours += 1
-                    minutes = 0
-                return f"{hours:02d}:{minutes:02d}"
-            # Handle Excel serial time format (0.625 = 15:00)
-            elif 0 <= num_val <= 1:
-                total_minutes = round(num_val * 1440)
-                hours = total_minutes // 60
-                minutes = total_minutes % 60
-                return f"{hours:02d}:{minutes:02d}"
-        except (ValueError, TypeError):
-            pass
-            
-    except (ValueError, TypeError, AttributeError):
-        pass
-    
-    return "N/A"
+        num_val = float(time_value)
+    except (ValueError, TypeError):
+        return None
+
+    # Excel serial time format (0.625 = 15:00)
+    if 0 <= num_val <= 1:
+        total_minutes = round(num_val * 1440)
+        hours = (total_minutes // 60) % 24
+        minutes = total_minutes % 60
+        return time(hours, minutes)
+
+    # 9.30 meaning 09:30 (decimal part is minutes directly)
+    if 0 <= num_val < 24:
+        hours = int(num_val)
+        decimal_part = num_val - hours
+        minutes = round(decimal_part * 100)
+        if minutes > 59:
+            minutes = round(decimal_part * 60)
+        if minutes >= 60:
+            hours = (hours + 1) % 24
+            minutes = 0
+        if 0 <= hours < 24 and 0 <= minutes < 60:
+            return time(hours, minutes)
+
+    return None
 
 # Define all time conversion functions first
 def safe_str_to_time_obj(time_str):
     """Convert time string to time object safely"""
-    if pd.isna(time_str) or time_str == "N/A" or time_str == "" or time_str is None:
-        return None
-    try:
-        # If it's already a time object, return it directly
-        if isinstance(time_str, time):
-            return time_str
-        
-        # Handle datetime objects (extract time part)
-        if isinstance(time_str, datetime):
-            return time(time_str.hour, time_str.minute)
-        
-        time_str = str(time_str).strip()
-        
-        # Handle HH:MM format (with colon)
-        if ":" in time_str:
-            parts = time_str.split(":")
-            if len(parts) == 2:
-                try:
-                    h = int(parts[0])
-                    m = int(parts[1])
-                    if 0 <= h < 24 and 0 <= m < 60:
-                        return time(h, m)
-                except (ValueError, TypeError):
-                    pass
-        
-        # Handle HH.MM format (from Excel - dot separator)
-        if "." in time_str:
-            parts = time_str.split(".")
-            if len(parts) == 2:
-                try:
-                    h = int(parts[0])
-                    m = int(parts[1])
-                    if 0 <= h < 24 and 0 <= m < 60:
-                        return time(h, m)
-                except (ValueError, TypeError):
-                    pass
-    except (ValueError, IndexError, AttributeError, TypeError):
-        pass
-    
-    return None
+    return _coerce_to_time_obj(time_str)
 
 def time_obj_to_str(t):
     """Convert time object to 24-hour HH:MM string for Excel"""
@@ -1387,55 +1366,10 @@ if "CLEANING" in df.columns:
 
 # Convert time values to minutes since midnight for comparison
 def time_to_minutes(time_value):
-    if pd.isna(time_value) or time_value == "":
+    t = _coerce_to_time_obj(time_value)
+    if t is None:
         return pd.NA
-    
-    try:
-        # Handle datetime.time objects (from Excel/openpyxl reading time as datetime.time)
-        if isinstance(time_value, time):
-            return time_value.hour * 60 + time_value.minute
-        
-        # Handle datetime objects (in case Excel interprets as datetime)
-        if isinstance(time_value, datetime):
-            return time_value.hour * 60 + time_value.minute
-        
-        # If it's a string in HH.MM or HH:MM format
-        if isinstance(time_value, str):
-            time_str = time_value.strip()
-            # Handle HH.MM format
-            if "." in time_str:
-                parts = time_str.split(".")
-                if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-                    hours = int(parts[0])
-                    minutes = int(parts[1])
-                    return hours * 60 + minutes
-            # Handle HH:MM format
-            elif ":" in time_str:
-                parts = time_str.split(":")
-                if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-                    hours = int(parts[0])
-                    minutes = int(parts[1])
-                    return hours * 60 + minutes
-        
-        # Handle numeric format (e.g., 9.3 or 9.30 from Excel)
-        dec_float = float(time_value)
-        # Check if it's an Excel serial time (0-1 range)
-        if 0 <= dec_float <= 1:
-            return round(dec_float * 1440)
-        # Handle HH.MM format as number (e.g., 9.30 = 9 hours, 30 minutes)
-        elif 0 < dec_float < 24:
-            hours = int(dec_float)
-            # Decimal part represents minutes directly (e.g., .30 = 30 minutes)
-            decimal_part = dec_float - hours
-            minutes = round(decimal_part * 100)
-            # Ensure minutes are valid
-            if minutes > 59:
-                minutes = round(decimal_part * 60)  # Fallback to fractional interpretation
-            return hours * 60 + minutes
-    except (ValueError, TypeError, AttributeError):
-        pass
-    
-    return pd.NA
+    return t.hour * 60 + t.minute
 
 df["In_min"] = df["In Time"].apply(time_to_minutes).astype('Int64')
 df["Out_min"] = df["Out Time"].apply(time_to_minutes).astype('Int64')
@@ -1892,25 +1826,15 @@ if edited_all is not None:
                         # Handle In Time - properly convert time object to HH:MM string for Excel
                         if "In Time" in row.index:
                             in_time_val = row["In Time"]
-                            time_str = ""
-                            if in_time_val is not None and not pd.isna(in_time_val) and str(in_time_val) != "NaT":
-                                if isinstance(in_time_val, time):
-                                    # Use colon format (HH:MM) so Excel preserves it as text
-                                    time_str = f"{in_time_val.hour:02d}:{in_time_val.minute:02d}"
-                                else:
-                                    time_str = str(in_time_val)
+                            t = _coerce_to_time_obj(in_time_val)
+                            time_str = f"{t.hour:02d}:{t.minute:02d}" if t is not None else ""
                             df_updated.iloc[orig_idx, df_updated.columns.get_loc("In Time")] = time_str
                         
                         # Handle Out Time - properly convert time object to HH:MM string for Excel
                         if "Out Time" in row.index:
                             out_time_val = row["Out Time"]
-                            time_str = ""
-                            if out_time_val is not None and not pd.isna(out_time_val) and str(out_time_val) != "NaT":
-                                if isinstance(out_time_val, time):
-                                    # Use colon format (HH:MM) so Excel preserves it as text
-                                    time_str = f"{out_time_val.hour:02d}:{out_time_val.minute:02d}"
-                                else:
-                                    time_str = str(out_time_val)
+                            t = _coerce_to_time_obj(out_time_val)
+                            time_str = f"{t.hour:02d}:{t.minute:02d}" if t is not None else ""
                             df_updated.iloc[orig_idx, df_updated.columns.get_loc("Out Time")] = time_str
                         
                         # Handle other columns
