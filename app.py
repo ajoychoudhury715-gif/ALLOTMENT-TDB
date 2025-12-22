@@ -4,6 +4,8 @@ from datetime import datetime, time, timezone, timedelta
 import os
 # Add missing import
 import hashlib
+import re  # for creating safe keys for buttons
+import uuid  # for generating stable row IDs
 # To install required packages, run in your terminal:
 # pip install --upgrade pip
 # pip install pandas openpyxl streamlit streamlit-autorefresh
@@ -18,8 +20,22 @@ except Exception:
     def st_autorefresh(interval=60000, debounce=True, key=None):
         return None
 
-# Page config
-st.set_page_config(page_title="ALLOTMENT", layout="wide", initial_sidebar_state="collapsed")
+# Page config - responsive layout
+st.set_page_config(
+    page_title="ALLOTMENT", 
+    layout="wide", 
+    initial_sidebar_state="collapsed",
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': None
+    }
+)
+
+# Add viewport meta tag for mobile responsiveness
+st.markdown("""
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+""", unsafe_allow_html=True)
 
 # ===== COLOR CUSTOMIZATION SECTION =====
 # Easily modify these colors to change the entire theme
@@ -498,17 +514,233 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Professional Header with Logo
-col_logo, col_title, col_space = st.columns([0.3, 2, 0.3])
+# Mobile responsive CSS (applied to all)
+st.markdown("""
+    <style>
+    /* Compact styles for all views */
+    .main {
+        padding: 1rem 0.5rem !important;
+    }
 
-with col_logo:
+    .header-container {
+        padding: 1rem 0.5rem !important;
+        margin: 0 0.5rem !important;
+    }
+
+    .dashboard-title {
+        font-size: 1.5rem !important;
+        letter-spacing: 0.5px !important;
+    }
+
+    .dashboard-subtitle {
+        font-size: 0.8rem !important;
+        margin-top: 0.5rem !important;
+    }
+
+    /* Logo sizing */
+    .mobile-logo img {
+        width: 100px !important;
+        height: auto !important;
+        max-width: 100% !important;
+    }
+
+    /* Header stacking */
+    .mobile-header {
+        flex-direction: column !important;
+        gap: 1rem !important;
+        padding: 1rem 0.5rem !important;
+    }
+
+    .mobile-logo, .mobile-title {
+        width: 100% !important;
+    }
+
+    /* Column layouts */
+    [data-testid="column"] {
+        min-width: 100% !important;
+        margin-bottom: 1rem !important;
+    }
+
+    /* Data editor - horizontal scroll */
+    [data-testid="stDataFrameContainer"] {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        max-width: 100vw !important;
+        margin: 0 -0.5rem !important;
+    }
+
+    /* Table adjustments */
+    [data-testid="stDataFrameContainer"] thead th {
+        padding: 8px 6px !important;
+        font-size: 0.75rem !important;
+        min-width: 80px !important;
+        white-space: nowrap !important;
+    }
+
+    [data-testid="stDataFrameContainer"] tbody td {
+        padding: 8px 6px !important;
+        font-size: 0.8rem !important;
+        min-width: 80px !important;
+        white-space: nowrap !important;
+    }
+
+    /* Button adjustments */
+    .stButton>button {
+        padding: 8px 16px !important;
+        font-size: 0.85rem !important;
+        width: 100% !important;
+        margin-bottom: 0.5rem !important;
+    }
+
+    /* Tabs - stack vertically */
+    .stTabs [data-baseweb="tab-list"] {
+        flex-direction: column !important;
+        gap: 0.5rem !important;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        padding: 8px 12px !important;
+        font-size: 0.85rem !important;
+        border-radius: 6px !important;
+        margin-bottom: 0.25rem !important;
+    }
+
+    /* Select dropdowns */
+    [data-baseweb="select"] button {
+        font-size: 0.85rem !important;
+        padding: 6px 8px !important;
+    }
+
+    /* Time inputs */
+    input[type="time"] {
+        font-size: 0.85rem !important;
+        padding: 6px 8px !important;
+    }
+
+    /* Alerts/messages */
+    .st-info, .st-success, .st-warning, .st-error {
+        padding: 8px 12px !important;
+            font-size: 0.85rem !important;
+            margin: 0.5rem 0 !important;
+    }
+
+    /* Section headers */
+    h1, h2, h3 {
+        font-size: 1.2rem !important;
+        margin: 1rem 0 0.5rem 0 !important;
+    }
+
+    /* Divider */
+    .divider-line {
+        margin: 0.5rem 0 !important;
+    }
+
+    /* Timestamp */
+    .stMarkdown p {
+        font-size: 0.85rem !important;
+        text-align: center !important;
+    }
+
+    /* Hide unnecessary elements */
+    .st-emotion-cache-1v0mbdj {
+        display: none !important;
+    }
+
+    /* Data editor specific adjustments */
+    div[data-testid="stDataFrameContainer"] div[data-testid="stDataFrame"] {
+        min-width: 800px !important; /* Force horizontal scroll */
+    }
+
+    /* Checkbox adjustments */
+    input[type="checkbox"] {
+        transform: scale(1.2) !important;
+        margin: 0 0.5rem !important;
+    }
+
+    /* Toast positioning */
+    .stToast {
+        position: fixed !important;
+        top: 10px !important;
+        left: 10px !important;
+        right: 10px !important;
+        z-index: 9999 !important;
+    }
+
+    /* Expander adjustments */
+    .st-expander {
+        margin-bottom: 1rem !important;
+    }
+
+    .st-expander .st-expanderHeader {
+        padding: 0.75rem 1rem !important;
+        font-size: 1rem !important;
+        font-weight: 600 !important;
+    }
+
+    /* Sidebar collapse */
+    [data-testid="stSidebarCollapsedControl"] {
+        display: none !important;
+    }
+
+    /* Extra compact styles */
+    .main {
+        padding: 0.5rem 0.25rem !important;
+    }
+
+    .header-container {
+        padding: 0.75rem 0.5rem !important;
+        margin: 0 0.25rem !important;
+    }
+
+    .dashboard-title {
+        font-size: 1.2rem !important;
+    }
+
+    .dashboard-subtitle {
+        font-size: 0.75rem !important;
+    }
+
+    /* Logo sizing */
+    .mobile-logo img {
+        width: 80px !important;
+    }
+
+    [data-testid="stDataFrameContainer"] thead th {
+        padding: 6px 4px !important;
+        font-size: 0.7rem !important;
+        min-width: 70px !important;
+        }
+
+        [data-testid="stDataFrameContainer"] tbody td {
+            padding: 6px 4px !important;
+            font-size: 0.75rem !important;
+            min-width: 70px !important;
+        }
+
+        .stButton>button {
+            padding: 6px 12px !important;
+            font-size: 0.8rem !important;
+        }
+
+        .stTabs [data-baseweb="tab"] {
+            padding: 6px 10px !important;
+            font-size: 0.8rem !important;
+        }
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# Use columns for side-by-side layout
+col1, col2 = st.columns([1, 3])  # Adjust ratio as needed
+
+with col1:
     st.image("The Dental Bond LOGO_page-0001.jpg", width=140)
 
-with col_title:
+with col2:
     st.markdown("""
         <style>
         .header-container {
-            padding: 2rem 2.5rem;
+            padding: 1rem;
             background: linear-gradient(135deg, rgba(153, 88, 47, 0.12) 0%, rgba(201, 187, 176, 0.1) 100%);
             border-radius: 12px;
             border: 1px solid rgba(201, 187, 176, 0.3);
@@ -518,16 +750,16 @@ with col_title:
         .dashboard-title {
             margin: 0;
             padding: 0;
-            font-size: 2.3rem;
+            font-size: 1.5rem;
             font-weight: 700;
             color: #111b26;
-            letter-spacing: 1.5px;
+            letter-spacing: 0.5px;
             text-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
             word-spacing: 0.1em;
         }
         .dashboard-subtitle {
-            margin-top: 1rem;
-            font-size: 0.9rem;
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
             color: #99582f;
             letter-spacing: 0.5px;
             font-weight: 500;
@@ -559,6 +791,13 @@ st.markdown("""
 IST = timezone(timedelta(hours=5, minutes=30))
 now = datetime.now(IST)
 st.markdown(f" {now.strftime('%B %d, %Y - %I:%M:%S %p')} IST")
+
+# --- Reminder settings in sidebar ---
+with st.sidebar:
+    st.markdown("## Notifications")
+    st.checkbox("Enable 15-minute reminders", value=True, key="enable_reminders")
+    st.selectbox("Default snooze (minutes)", options=[5,10,15,30], index=0, key="default_snooze")
+    st.write("🔔 Reminders alert 15 minutes before a patient's In Time.")
 
 
 # File check using absolute path
@@ -771,6 +1010,62 @@ df.loc[df["Out_min"] < df["In_min"], "Out_min"] += 1440
 # Current time in minutes (same day)
 current_min = now.hour * 60 + now.minute
 
+# Ensure we have stable row IDs and persistence columns for reminders
+added_ids = False
+if 'REMINDER_ROW_ID' not in df_raw.columns:
+    df_raw['REMINDER_ROW_ID'] = [str(uuid.uuid4()) for _ in range(len(df_raw))]
+    added_ids = True
+if 'REMINDER_SNOOZE_UNTIL' not in df_raw.columns:
+    df_raw['REMINDER_SNOOZE_UNTIL'] = pd.NA
+if 'REMINDER_DISMISSED' not in df_raw.columns:
+    df_raw['REMINDER_DISMISSED'] = False
+
+# If we generated IDs, persist them immediately so they remain stable across runs
+if added_ids:
+    try:
+        with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+            df_raw.to_excel(writer, sheet_name='Sheet1', index=False)
+        st.toast("🆔 Generated stable REMINDER_ROW_ID values and saved to Excel.", icon="✅")
+    except Exception as e:
+        st.error(f"Error saving REMINDER_ROW_ID to Excel: {e}")
+
+# Refresh the working df to include new columns
+df = df_raw.copy()
+
+# Helper to persist a snooze/dismiss change by REMINDER_ROW_ID
+def _persist_reminder_to_excel(row_id, until, dismissed):
+    """Persist snooze/dismiss fields back to Excel for the matching row id."""
+    try:
+        match = df_raw[df_raw.get('REMINDER_ROW_ID') == row_id]
+        if not match.empty:
+            ix = match.index[0]
+            df_raw.at[ix, 'REMINDER_SNOOZE_UNTIL'] = int(until) if until is not None else pd.NA
+            df_raw.at[ix, 'REMINDER_DISMISSED'] = bool(dismissed)
+            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                df_raw.to_excel(writer, sheet_name='Sheet1', index=False)
+            return True
+    except Exception as e:
+        st.error(f"Error persisting reminder for {row_id}: {e}")
+    return False
+
+# Load persisted reminders/dismissals into session state (by row id)
+for idx, row in df_raw.iterrows():
+    try:
+        row_id = row.get('REMINDER_ROW_ID')
+        until = row.get('REMINDER_SNOOZE_UNTIL')
+        if pd.notna(until):
+            try:
+                until_int = int(until)
+                if until_int > current_min:
+                    st.session_state.snoozed[row_id] = until_int
+            except Exception:
+                pass
+        dismissed = row.get('REMINDER_DISMISSED')
+        if str(dismissed).strip().upper() in ['TRUE','1','T','YES']:
+            st.session_state.reminder_sent.add(row_id)
+    except Exception:
+        continue
+
 # Mark ongoing
 df["Is_Ongoing"] = (df["In_min"] <= current_min) & (current_min <= df["Out_min"])
 
@@ -780,6 +1075,8 @@ if 'prev_hash' not in st.session_state:
     st.session_state.prev_ongoing = set()
     st.session_state.prev_upcoming = set()
     st.session_state.prev_raw = pd.DataFrame()
+    st.session_state.reminder_sent = set()  # Track one-time 15-min reminders per patient
+    st.session_state.snoozed = {}  # Map patient -> snooze_until_min (minutes since midnight)
 
 # Compute hash to detect file changes
 current_hash = hashlib.md5(pd.util.hash_pandas_object(df_raw).values.tobytes()).hexdigest()
@@ -789,6 +1086,8 @@ if st.session_state.prev_hash != current_hash:
     # Reset tracked sets on file change
     st.session_state.prev_ongoing = set()
     st.session_state.prev_upcoming = set()
+    st.session_state.reminder_sent = set()  # clear reminders when file changes
+    st.session_state.snoozed = {}  # clear snoozed reminders as well
 
 st.session_state.prev_hash = current_hash
 
@@ -798,13 +1097,14 @@ ongoing_df = df[
     ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE|SHIFTED", na=True)
 ]
 
-current_ongoing = set(ongoing_df["Patient Name"].dropna())
+current_ongoing = set(ongoing_df["REMINDER_ROW_ID"].dropna())
 
 # New ongoing (either from time passing or manual status update)
 new_ongoing = current_ongoing - st.session_state.prev_ongoing
-for patient in new_ongoing:
-    row = ongoing_df[ongoing_df["Patient Name"] == patient].iloc[0]
-    st.toast(f"🚨 NOW ONGOING: {patient} – {row['Procedure']} with {row['DR.']} (Chair {row['OP']})", icon="🟢")
+for row_id in new_ongoing:
+    row = ongoing_df[ongoing_df["REMINDER_ROW_ID"] == row_id].iloc[0]
+    name = row.get('Patient Name', 'Unknown')
+    st.toast(f"🚨 NOW ONGOING: {name} – {row['Procedure']} with {row['DR.']} (Chair {row['OP']})", icon="🟢")
 
 # Upcoming in next 15 minutes
 upcoming_min = current_min + 15
@@ -814,29 +1114,119 @@ upcoming_df = df[
     ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE|SHIFTED", na=True)
 ]
 
-current_upcoming = set(upcoming_df["Patient Name"].dropna())
+current_upcoming = set(upcoming_df["REMINDER_ROW_ID"].dropna())
 
 # New upcoming (just entered the 15-minute window)
 new_upcoming = current_upcoming - st.session_state.prev_upcoming
-for patient in new_upcoming:
-    row = upcoming_df[upcoming_df["Patient Name"] == patient].iloc[0]
+for row_id in new_upcoming:
+    row = upcoming_df[upcoming_df["REMINDER_ROW_ID"] == row_id].iloc[0]
     mins_left = row["In_min"] - current_min
-    st.toast(f"⏰ Upcoming in ~{mins_left} min: {patient} – {row['Patient Name']} with {row['DR.']}", icon="⚠️")
+    name = row.get('Patient Name', 'Unknown')
+    st.toast(f"⏰ Upcoming in ~{mins_left} min: {name} – {row['Procedure']} with {row['DR.']}", icon="⚠️")
+
+# 15-minute-before reminders — ensure we show the reminder only once per patient
+if st.session_state.get("enable_reminders", True):
+    # Clean up expired snoozes
+    expired = [p for p, until in list(st.session_state.snoozed.items()) if until <= current_min]
+    for p in expired:
+        del st.session_state.snoozed[p]
+
+    reminder_df = df[
+        (df["In_min"].notna()) &
+        (df["In_min"] - current_min > 0) &
+        (df["In_min"] - current_min <= 15) &
+        ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE|SHIFTED", na=True)
+    ]
+    for idx, row in reminder_df.iterrows():
+        row_id = row.get('REMINDER_ROW_ID')
+        patient = row.get("Patient Name", "Unknown")
+        mins_left = int(row["In_min"] - current_min)
+        # Skip if snoozed and still snooze-active (by row id)
+        if row_id in st.session_state.snoozed and st.session_state.snoozed[row_id] > current_min:
+            continue
+        if row_id not in st.session_state.reminder_sent:
+            st.toast(f"🔔 Reminder: {patient} scheduled in ~{mins_left} min at {row['In Time Str']} with {row['DR.']} (OP {row['OP']})", icon="🔔")
+            st.session_state.reminder_sent.add(row_id)
+
+    # Show a Reminders panel allowing Snooze/Dismiss actions
+    def _safe_key(s):
+        return re.sub(r"\W+", "_", str(s))
+
+    with st.expander("🔔 Reminders", expanded=False):
+        if reminder_df.empty:
+            st.caption("No reminders within the next 15 minutes.")
+        else:
+            for idx, row in reminder_df.iterrows():
+                row_id = row.get('REMINDER_ROW_ID')
+                patient = row.get('Patient Name', 'Unknown')
+                mins_left = int(row["In_min"] - current_min)
+                col1, col2, col3, col4, col5 = st.columns([4,1,1,1,1])
+                col1.markdown(f"**{patient}** — {row.get('Procedure','')} (in ~{mins_left} min at {row['In Time Str']})")
+                default_minutes = int(st.session_state.get("default_snooze", 5))
+                if col2.button(f"Snooze {default_minutes}", key=f"snooze_{_safe_key(row_id)}_default"):
+                    until = current_min + default_minutes
+                    st.session_state.snoozed[row_id] = until
+                    st.session_state.reminder_sent.discard(row_id)
+                    _persist_reminder_to_excel(row_id, until, False)
+                    st.toast(f"😴 Snoozed {patient} for {default_minutes} minutes", icon="💤")
+                    st.experimental_rerun()
+                if col3.button("Snooze 5", key=f"snooze_{_safe_key(row_id)}_5"):
+                    until = current_min + 5
+                    st.session_state.snoozed[row_id] = until
+                    st.session_state.reminder_sent.discard(row_id)
+                    _persist_reminder_to_excel(row_id, until, False)
+                    st.toast(f"😴 Snoozed {patient} for 5 minutes", icon="💤")
+                    st.experimental_rerun()
+                if col4.button("Snooze 10", key=f"snooze_{_safe_key(row_id)}_10"):
+                    until = current_min + 10
+                    st.session_state.snoozed[row_id] = until
+                    st.session_state.reminder_sent.discard(row_id)
+                    _persist_reminder_to_excel(row_id, until, False)
+                    st.toast(f"😴 Snoozed {patient} for 10 minutes", icon="💤")
+                    st.experimental_rerun()
+                if col5.button("Dismiss", key=f"dismiss_{_safe_key(row_id)}"):
+                    st.session_state.reminder_sent.add(row_id)
+                    _persist_reminder_to_excel(row_id, None, True)
+                    st.toast(f"🗑️ Dismissed reminder for {patient}", icon="✅")
+                    st.experimental_rerun()
+
+            # Snoozed reminders listing with cancel option
+            if st.session_state.snoozed:
+                st.markdown("---")
+                st.markdown("**Snoozed reminders**")
+                for row_id, until in list(st.session_state.snoozed.items()):
+                    remaining = until - current_min
+                    if remaining > 0:
+                        c1, c2 = st.columns([4,1])
+                        # show patient name if available
+                        name = df[df['REMINDER_ROW_ID'] == row_id]['Patient Name'].iloc[0] if not df[df['REMINDER_ROW_ID'] == row_id].empty else row_id
+                        c1.write(f"{name} — snoozed for ~{remaining} more min")
+                        if c2.button("Cancel Snooze", key=f"cancel_{_safe_key(row_id)}"):
+                            # remove persistence
+                            _persist_reminder_to_excel(row_id, None, False)
+                            del st.session_state.snoozed[row_id]
+                            st.toast(f"✅ Cancelled snooze for {name}", icon="✅")
+                            st.experimental_rerun()
+                    else:
+                        # remove expired snooze entry and clear persistence as well
+                        _persist_reminder_to_excel(row_id, None, False)
+                        del st.session_state.snoozed[row_id]
 
 # New arrivals (manual status change in Excel)
-current_arrived = set(df_raw[df_raw["STATUS"].astype(str).str.upper() == "ARRIVED"]["Patient Name"].dropna())
-if ("STATUS" in st.session_state.prev_raw.columns) and ("Patient Name" in st.session_state.prev_raw.columns):
+current_arrived = set(df_raw[df_raw["STATUS"].astype(str).str.upper() == "ARRIVED"]["REMINDER_ROW_ID"].dropna())
+if ("STATUS" in st.session_state.prev_raw.columns) and ("REMINDER_ROW_ID" in st.session_state.prev_raw.columns):
     prev_arrived = set(
         st.session_state.prev_raw[
             st.session_state.prev_raw["STATUS"].astype(str).str.upper() == "ARRIVED"
-        ]["Patient Name"].dropna()
+        ]["REMINDER_ROW_ID"].dropna()
     )
 else:
     prev_arrived = set()
 new_arrived = current_arrived - prev_arrived
-for patient in new_arrived:
-    row = df[df["Patient Name"] == patient].iloc[0]
-    st.toast(f"👤 Patient ARRIVED: {patient} – {row['Procedure']}", icon="🟡")
+for row_id in new_arrived:
+    row = df[df["REMINDER_ROW_ID"] == row_id].iloc[0]
+    name = row.get('Patient Name', 'Unknown')
+    st.toast(f"👤 Patient ARRIVED: {name} – {row['Procedure']}", icon="🟡")
 
 # Update session state for next run
 st.session_state.prev_ongoing = current_ongoing
@@ -864,10 +1254,9 @@ def highlight_row(row):
     return [color for _ in row]
 
 # ================ Full Schedule ================
-st.markdown("### 📅 Full Today's Schedule")
-
-# Add new patient button and save button
-col1, col2, col3 = st.columns([0.15, 0.15, 0.7])
+with st.expander("📅 Full Today's Schedule", expanded=True):
+    # Add new patient button and save button - responsive
+    col1, col2, col3 = st.columns([1, 1, 2])  # Equal width for buttons on mobile
 with col1:
     if st.button("➕ Add Patient", use_container_width=True):
         # Create a new empty row
@@ -884,7 +1273,10 @@ with col1:
             "OP": "",
             "SUCTION": False,
             "CLEANING": False,
-            "STATUS": "WAITING"
+            "STATUS": "WAITING",
+            "REMINDER_ROW_ID": str(uuid.uuid4()),
+            "REMINDER_SNOOZE_UNTIL": pd.NA,
+            "REMINDER_DISMISSED": False
         }
         # Append to the original dataframe
         new_row_df = pd.DataFrame([new_row])
@@ -1002,8 +1394,11 @@ if edited_all is not None:
                         # Handle Patient Name
                         patient_name = str(row["Patient Name"]).strip() if row["Patient Name"] and str(row["Patient Name"]) != "" else ""
                         if patient_name == "":
-                            # Clear entire row if patient name is empty
+                            # Clear user-editable columns if patient name is empty, but preserve reminder metadata
+                            preserve = ['REMINDER_ROW_ID', 'REMINDER_SNOOZE_UNTIL', 'REMINDER_DISMISSED']
                             for col in df_updated.columns:
+                                if col in preserve:
+                                    continue
                                 df_updated.iloc[idx, df_updated.columns.get_loc(col)] = ""
                             continue
                         df_updated.iloc[idx, df_updated.columns.get_loc("Patient Name")] = patient_name
@@ -1057,14 +1452,21 @@ if edited_all is not None:
                 df_updated.to_excel(writer, sheet_name="Sheet1", index=False)
             
             st.toast("✅ Schedule updated in Excel!", icon="💾")
+            
+            # Update session state to reflect the changes for proper change detection
+            import hashlib
+            current_hash = hashlib.md5(df_updated.to_string().encode()).hexdigest()
+            st.session_state.prev_hash = current_hash
+            st.session_state.prev_raw = df_updated.copy()
+            
             # Auto-refresh all views after saving
             st.rerun()
         except Exception as e:
             st.error(f"Error saving to Excel: {e}")
 
 # ================ Per Chair Tabs ================
-st.markdown("###  Schedule by OP")
-unique_ops = sorted(df["OP"].dropna().unique())
+with st.expander("🪑 Schedule by OP", expanded=False):
+    unique_ops = sorted(df["OP"].dropna().unique())
 
 if unique_ops:
     tabs = st.tabs([str(op) for op in unique_ops])
@@ -1126,19 +1528,18 @@ if unique_ops:
 else:
     st.info("No chair data available.")
 
-
 # ================ Doctor Statistics ================
-st.markdown("### 👨‍⚕️ Schedule Summary by Doctor")
-groupby_column = "DR."
-if groupby_column in df.columns and not df[groupby_column].isnull().all():
-    try:
-        doctor_procedures = df[df["DR."].notna()].groupby("DR.").size().reset_index(name="Total Procedures")
-        doctor_procedures = doctor_procedures.reset_index(drop=True)
-        if not doctor_procedures.empty:
-            edited_doctor = st.data_editor(doctor_procedures, use_container_width=True, key="doctor_editor", hide_index=True)
-        else:
-            st.info(f"No data available for '{groupby_column}'.")
-    except Exception as e:
-        st.error(f"Error processing doctor data: {e}")
-else:
-    st.info(f"Column '{groupby_column}' not found or contains only empty values.")
+with st.expander("👨‍⚕️ Schedule Summary by Doctor", expanded=False):
+    groupby_column = "DR."
+    if groupby_column in df.columns and not df[groupby_column].isnull().all():
+        try:
+            doctor_procedures = df[df["DR."].notna()].groupby("DR.").size().reset_index(name="Total Procedures")
+            doctor_procedures = doctor_procedures.reset_index(drop=True)
+            if not doctor_procedures.empty:
+                edited_doctor = st.data_editor(doctor_procedures, use_container_width=True, key="doctor_editor", hide_index=True)
+            else:
+                st.info(f"No data available for '{groupby_column}'.")
+        except Exception as e:
+            st.error(f"Error processing doctor data: {e}")
+    else:
+        st.info(f"Column '{groupby_column}' not found or contains only empty values.")
