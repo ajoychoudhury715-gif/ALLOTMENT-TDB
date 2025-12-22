@@ -372,16 +372,28 @@ st.markdown(
     button[title="Add a new patient row (uses selected patient if chosen)"] {{
         position: relative !important;
         overflow: hidden !important;
+        background: #99582f !important;
+        color: #f9f9f9 !important;
     }}
 
     button[title="Save changes to storage"] {{
         position: relative !important;
         overflow: hidden !important;
+        background: #99582f !important;
+        color: #f9f9f9 !important;
     }}
 
     button[title="Add a new patient row (uses selected patient if chosen)"]:hover,
     button[title="Save changes to storage"]:hover {{
+        background: #111b26 !important;
+        color: #f9f9f9 !important;
         animation: pulse-glow 1.4s ease-out infinite !important;
+    }}
+
+    button[title="Add a new patient row (uses selected patient if chosen)"]:active,
+    button[title="Save changes to storage"]:active {{
+        background: #111b26 !important;
+        color: #f9f9f9 !important;
     }}
     
     .st-bv, .st-cv, .st-cw {{
