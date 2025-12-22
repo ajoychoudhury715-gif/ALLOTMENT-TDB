@@ -19,7 +19,8 @@ A **Streamlit-based real-time scheduling dashboard** for managing dental allotme
 - Loading screen with animated spinner
 
 ☁️ **Cloud-Ready**
-- **Google Sheets integration** for persistent cloud storage
+- **Supabase (Postgres) integration** for persistent cloud storage (recommended)
+- Optional **Google Sheets integration** (fallback)
 - Works on Streamlit Cloud without data loss
 - Falls back to local Excel file for development
 - Real-time sync across all users
@@ -35,6 +36,37 @@ A **Streamlit-based real-time scheduling dashboard** for managing dental allotme
 ## Deployment Options
 
 ### Option 1: Streamlit Cloud (Recommended for Production)
+
+#### Option 1A (Recommended): Supabase (No Google Sheets)
+
+1. **Create a Supabase project**
+   - Go to https://supabase.com and create a new project
+   - In the Supabase dashboard → **SQL Editor**, run:
+
+```sql
+create table if not exists tdb_allotment_state (
+  id text primary key,
+  payload jsonb not null,
+  updated_at timestamptz not null default now()
+);
+```
+
+2. **Deploy to Streamlit Cloud**
+   - Go to https://share.streamlit.io and deploy this repo
+   - In app settings → **Secrets**, add:
+
+```toml
+supabase_url = "https://YOUR_PROJECT_REF.supabase.co"
+supabase_key = "YOUR_SUPABASE_ANON_KEY"
+
+# Optional overrides:
+# supabase_table = "tdb_allotment_state"
+# supabase_row_id = "main"
+```
+
+The app will store the whole schedule in a single row (`id = "main"`) as JSON.
+
+#### Option 1B: Google Sheets (Alternative)
 
 1. **Create a Google Sheet**
    - Go to [Google Sheets](https://sheets.google.com) and create a new spreadsheet

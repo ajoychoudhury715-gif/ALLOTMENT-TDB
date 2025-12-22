@@ -10,6 +10,13 @@ import re  # for creating safe keys for buttons
 import uuid  # for generating stable row IDs
 import json
 
+# Supabase integration (Postgres) for persistent cloud storage (no Google)
+try:
+    from supabase import create_client  # type: ignore
+    SUPABASE_AVAILABLE = True
+except Exception:
+    SUPABASE_AVAILABLE = False
+
 # Google Sheets integration for persistent cloud storage
 try:
     import gspread
@@ -583,7 +590,15 @@ with st.sidebar:
 
 # ================ Data Storage Configuration ================
 # Determine whether to use Google Sheets (cloud) or local Excel file
+USE_SUPABASE = False
 USE_GOOGLE_SHEETS = False
+
+file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Putt Allotment.xlsx")
+
+supabase_client = None
+supabase_table_name = "tdb_allotment_state"
+supabase_row_id = "main"
+
 gsheet_client = None
 gsheet_worksheet = None
 
@@ -714,6 +729,97 @@ def _open_spreadsheet(client, spreadsheet_ref: str):
     return client.open_by_key(ref)
 
 
+def _get_supabase_config_from_secrets_or_env():
+    """Return (url, key, table, row_id) from Streamlit secrets/env vars."""
+    url = ""
+    key = ""
+    table = supabase_table_name
+    row_id = supabase_row_id
+
+    try:
+        if hasattr(st, 'secrets'):
+            url = str(st.secrets.get("supabase_url", "") or "").strip()
+            key = str(st.secrets.get("supabase_key", "") or "").strip()
+            table = str(st.secrets.get("supabase_table", table) or table).strip() or table
+            row_id = str(st.secrets.get("supabase_row_id", row_id) or row_id).strip() or row_id
+    except Exception:
+        pass
+
+    if not url:
+        url = os.getenv("SUPABASE_URL", "").strip()
+    if not key:
+        key = os.getenv("SUPABASE_KEY", "").strip()
+    if os.getenv("SUPABASE_TABLE"):
+        table = os.getenv("SUPABASE_TABLE", table).strip() or table
+    if os.getenv("SUPABASE_ROW_ID"):
+        row_id = os.getenv("SUPABASE_ROW_ID", row_id).strip() or row_id
+
+    return url, key, table, row_id
+
+
+def _get_expected_columns():
+    return [
+        "Patient Name", "In Time", "Out Time", "Procedure", "DR.",
+        "FIRST", "SECOND", "Third", "CASE PAPER", "OP",
+        "SUCTION", "CLEANING", "STATUS", "REMINDER_ROW_ID",
+        "REMINDER_SNOOZE_UNTIL", "REMINDER_DISMISSED",
+    ]
+
+
+@st.cache_data(ttl=30)
+def load_data_from_supabase(_url: str, _key: str, _table: str, _row_id: str):
+    """Load dataframe payload from Supabase.
+
+    Storage model: a single row with `id` and `payload` (jsonb).
+    payload = {"columns": [...], "rows": [ {col: val, ...}, ... ]}
+    """
+    try:
+        client = create_client(_url, _key)
+        resp = client.table(_table).select("payload").eq("id", _row_id).execute()
+
+        data = getattr(resp, "data", None)
+        if not data:
+            return pd.DataFrame(columns=_get_expected_columns())
+        payload = data[0].get("payload") if isinstance(data, list) else None
+        if not payload:
+            return pd.DataFrame(columns=_get_expected_columns())
+
+        columns = payload.get("columns") or _get_expected_columns()
+        rows = payload.get("rows") or []
+        df = pd.DataFrame(rows)
+        # Ensure expected columns are present and ordered
+        for col in columns:
+            if col not in df.columns:
+                df[col] = ""
+        df = df[columns]
+        return df
+    except Exception as e:
+        st.error(f"Error loading from Supabase: {e}")
+        return None
+
+
+def save_data_to_supabase(_url: str, _key: str, _table: str, _row_id: str, df: pd.DataFrame) -> bool:
+    """Save dataframe payload to Supabase (upsert)."""
+    try:
+        client = create_client(_url, _key)
+
+        df_clean = df.copy().fillna("")
+        # Convert to JSON-serializable primitives; avoid pandas NA
+        for col in df_clean.columns:
+            df_clean[col] = df_clean[col].astype(object)
+
+        payload = {
+            "columns": df_clean.columns.tolist(),
+            "rows": df_clean.to_dict(orient="records"),
+        }
+        client.table(_table).upsert({"id": _row_id, "payload": payload}).execute()
+        load_data_from_supabase.clear()
+        return True
+    except Exception as e:
+        st.error(f"Error saving to Supabase: {e}")
+        return False
+
+
 def _validate_service_account_info(info: dict) -> list[str]:
     missing: list[str] = []
     if not isinstance(info, dict) or not info:
@@ -725,7 +831,23 @@ def _validate_service_account_info(info: dict) -> list[str]:
     return missing
 
 # Try to connect to Google Sheets if credentials are available
-if GSHEETS_AVAILABLE:
+if SUPABASE_AVAILABLE:
+    try:
+        sup_url, sup_key, sup_table, sup_row = _get_supabase_config_from_secrets_or_env()
+        if sup_url and sup_key:
+            supabase_client = create_client(sup_url, sup_key)
+            supabase_table_name = sup_table
+            supabase_row_id = sup_row
+            # Quick connectivity check (will also validate credentials)
+            _ = supabase_client.table(supabase_table_name).select("id").limit(1).execute()
+            USE_SUPABASE = True
+            st.sidebar.success("🗄️ Connected to Supabase")
+    except Exception as e:
+        st.sidebar.error(f"⚠️ Supabase connection failed: {e}")
+        USE_SUPABASE = False
+
+# Try to connect to Google Sheets if credentials are available (fallback)
+if (not USE_SUPABASE) and GSHEETS_AVAILABLE:
     try:
         # Check if running on Streamlit Cloud with secrets
         service_account_info = None
@@ -993,7 +1115,13 @@ st_autorefresh(interval=60000, debounce=True, key="autorefresh")
 # ================ Load Data ================
 df_raw = None
 
-if USE_GOOGLE_SHEETS:
+if USE_SUPABASE:
+    sup_url, sup_key, sup_table, sup_row = _get_supabase_config_from_secrets_or_env()
+    df_raw = load_data_from_supabase(sup_url, sup_key, sup_table, sup_row)
+    if df_raw is None:
+        st.error("⚠️ Failed to load data from Supabase.")
+        st.stop()
+elif USE_GOOGLE_SHEETS:
     # Load from Google Sheets
     df_raw = load_data_from_gsheets(gsheet_worksheet)
     if df_raw is None:
@@ -1001,10 +1129,9 @@ if USE_GOOGLE_SHEETS:
         st.stop()
 else:
     # Fallback to local Excel file
-    file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Putt Allotment.xlsx")
     if not os.path.exists(file_path):
-        st.error(f"⚠️ 'Putt Allotment.xlsx' not found. For cloud deployment, configure Google Sheets in Streamlit secrets.")
-        st.info("💡 See README for Google Sheets setup instructions.")
+        st.error("⚠️ 'Putt Allotment.xlsx' not found. For cloud deployment, configure Supabase (recommended) or Google Sheets in Streamlit secrets.")
+        st.info("💡 See README for Supabase setup instructions.")
         st.stop()
     
     # Retry logic to handle temporary file corruption during concurrent writes
@@ -1316,7 +1443,13 @@ df["Is_Ongoing"] = (df["In_min"] <= current_min) & (current_min <= df["Out_min"]
 def save_data(dataframe, show_toast=True, message="Data saved!"):
     """Save dataframe to Google Sheets or Excel based on configuration"""
     try:
-        if USE_GOOGLE_SHEETS:
+        if USE_SUPABASE:
+            sup_url, sup_key, sup_table, sup_row = _get_supabase_config_from_secrets_or_env()
+            success = save_data_to_supabase(sup_url, sup_key, sup_table, sup_row, dataframe)
+            if success and show_toast:
+                st.toast(f"🗄️ {message}", icon="✅")
+            return success
+        elif USE_GOOGLE_SHEETS:
             success = save_data_to_gsheets(gsheet_worksheet, dataframe)
             if success and show_toast:
                 st.toast(f"☁️ {message}", icon="✅")
