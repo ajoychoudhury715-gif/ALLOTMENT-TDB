@@ -2,6 +2,8 @@ import streamlit as st  # pyright: ignore[reportUndefinedVariable]
 import pandas as pd # pyright: ignore[reportMissingModuleSource]
 from datetime import datetime, time, timezone, timedelta
 import os
+import time as time_module  # for retry delays
+import zipfile  # for BadZipFile exception handling
 # Add missing import
 import hashlib
 import re  # for creating safe keys for buttons
@@ -579,7 +581,31 @@ if not os.path.exists(file_path):
 st_autorefresh(interval=60000, debounce=True, key="autorefresh")
 
 # Load raw data (fresh every run for real-time accuracy)
-df_raw = pd.read_excel(file_path, sheet_name="Sheet1")
+# Retry logic to handle temporary file corruption during concurrent writes
+max_retries = 3
+retry_delay = 0.5  # seconds
+df_raw = None
+
+for attempt in range(max_retries):
+    try:
+        df_raw = pd.read_excel(file_path, sheet_name="Sheet1")
+        break  # Success, exit retry loop
+    except (zipfile.BadZipFile, Exception) as e:
+        if "BadZipFile" in str(type(e).__name__) or "Truncated" in str(e) or "corrupt" in str(e).lower():
+            if attempt < max_retries - 1:
+                time_module.sleep(retry_delay)  # Wait before retry
+                continue
+            else:
+                st.error("⚠️ The Excel file appears to be corrupted or is being modified. Please try refreshing the page in a few seconds.")
+                st.info("💡 If this persists, check if the 'Putt Allotment.xlsx' file is valid and not open in another application.")
+                st.stop()
+        else:
+            # Re-raise non-corruption related errors
+            raise e
+
+if df_raw is None:
+    st.error("⚠️ Failed to load the Excel file after multiple attempts.")
+    st.stop()
 
 # Clean column names
 df_raw.columns = [col.strip() for col in df_raw.columns]
@@ -1093,6 +1119,8 @@ with col2:
 all_sorted = df
 display_all = all_sorted[["Patient Name", "In Time Obj", "Out Time Obj", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "OP", "SUCTION", "CLEANING", "STATUS"]].copy()
 display_all = display_all.rename(columns={"In Time Obj": "In Time", "Out Time Obj": "Out Time"})
+# Preserve original index for mapping edits back to df_raw
+display_all["_orig_idx"] = display_all.index
 display_all = display_all.reset_index(drop=True)
 
 # Convert all text columns to string to avoid type compatibility issues (BUT NOT TIME COLUMNS)
@@ -1110,6 +1138,7 @@ edited_all = st.data_editor(
     key="full_schedule_editor", 
     hide_index=True,
     column_config={
+        "_orig_idx": None,  # Hide the original index column
         "Patient Name": st.column_config.TextColumn(label="Patient Name"),
         "In Time": st.column_config.TimeColumn(label="In Time", format="hh:mm A"),
         "Out Time": st.column_config.TimeColumn(label="Out Time", format="hh:mm A"),
@@ -1159,9 +1188,9 @@ if edited_all is not None:
     # Compare non-time columns to detect changes (time columns need special handling due to object type)
     has_changes = False
     if not edited_all.equals(display_all):
-        # Check actual value differences
+        # Check actual value differences (skip _orig_idx which is for internal tracking)
         for col in edited_all.columns:
-            if col not in ["In Time", "Out Time"]:
+            if col not in ["In Time", "Out Time", "_orig_idx"]:
                 if not (edited_all[col] == display_all[col]).all():
                     has_changes = True
                     break
@@ -1182,16 +1211,22 @@ if edited_all is not None:
             
             # Process edited data and convert back to original format
             for idx, row in edited_all.iterrows():
-                if idx < len(df_updated):
+                # Use the preserved original index to map back to df_raw
+                orig_idx = row.get("_orig_idx", idx)
+                if pd.isna(orig_idx):
+                    orig_idx = idx
+                orig_idx = int(orig_idx)
+                
+                if orig_idx < len(df_updated):
                     try:
                         # Handle Patient Name
                         patient_name = str(row["Patient Name"]).strip() if row["Patient Name"] and str(row["Patient Name"]) != "" else ""
                         if patient_name == "":
                             # Clear entire row if patient name is empty
                             for col in df_updated.columns:
-                                df_updated.iloc[idx, df_updated.columns.get_loc(col)] = ""
+                                df_updated.iloc[orig_idx, df_updated.columns.get_loc(col)] = ""
                             continue
-                        df_updated.iloc[idx, df_updated.columns.get_loc("Patient Name")] = patient_name
+                        df_updated.iloc[orig_idx, df_updated.columns.get_loc("Patient Name")] = patient_name
                         
                         # Handle In Time - properly convert time object to HH.MM string for Excel
                         if "In Time" in row.index:
@@ -1202,7 +1237,7 @@ if edited_all is not None:
                                     time_str = f"{in_time_val.hour:02d}.{in_time_val.minute:02d}"
                                 else:
                                     time_str = str(in_time_val)
-                            df_updated.iloc[idx, df_updated.columns.get_loc("In Time")] = time_str
+                            df_updated.iloc[orig_idx, df_updated.columns.get_loc("In Time")] = time_str
                         
                         # Handle Out Time - properly convert time object to HH.MM string for Excel
                         if "Out Time" in row.index:
@@ -1213,14 +1248,14 @@ if edited_all is not None:
                                     time_str = f"{out_time_val.hour:02d}.{out_time_val.minute:02d}"
                                 else:
                                     time_str = str(out_time_val)
-                            df_updated.iloc[idx, df_updated.columns.get_loc("Out Time")] = time_str
+                            df_updated.iloc[orig_idx, df_updated.columns.get_loc("Out Time")] = time_str
                         
                         # Handle other columns
                         for col in ["Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "OP", "STATUS"]:
                             if col in row.index and col in df_updated.columns:
                                 val = row[col]
                                 clean_val = str(val).strip() if val and str(val) != "nan" else ""
-                                df_updated.iloc[idx, df_updated.columns.get_loc(col)] = clean_val
+                                df_updated.iloc[orig_idx, df_updated.columns.get_loc(col)] = clean_val
                         
                         # Handle checkbox columns (SUCTION, CLEANING) - convert boolean to check mark or empty
                         for col in ["SUCTION", "CLEANING"]:
@@ -1228,13 +1263,13 @@ if edited_all is not None:
                                 val = row[col]
                                 # Store True as "✓" checkmark, False/None as empty string
                                 if pd.isna(val) or val is None or val == False:
-                                    df_updated.iloc[idx, df_updated.columns.get_loc(col)] = ""
+                                    df_updated.iloc[orig_idx, df_updated.columns.get_loc(col)] = ""
                                 elif val == True:
-                                    df_updated.iloc[idx, df_updated.columns.get_loc(col)] = "✓"
+                                    df_updated.iloc[orig_idx, df_updated.columns.get_loc(col)] = "✓"
                                 else:
-                                    df_updated.iloc[idx, df_updated.columns.get_loc(col)] = ""
+                                    df_updated.iloc[orig_idx, df_updated.columns.get_loc(col)] = ""
                     except Exception as col_error:
-                        st.warning(f"Warning updating row {idx}: {str(col_error)}")
+                        st.warning(f"Warning updating row {orig_idx}: {str(col_error)}")
                         continue
             
             # Write back to Excel
