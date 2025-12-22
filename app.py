@@ -2025,27 +2025,23 @@ with col_del_pick:
             sentinel = "Select row to delete…"
             options = [sentinel] + sorted(option_map.keys())
 
-            prev_choice = st.session_state.get("delete_row_select")
-            if prev_choice not in options:
-                st.session_state["delete_row_select"] = sentinel
-                st.session_state.delete_row_id = ""
+            # IMPORTANT: Do not mutate st.session_state["delete_row_select"] here.
+            # Streamlit raises if you modify a widget key after it has been instantiated.
+            prev_choice = st.session_state.get("delete_row_select", sentinel)
+            default_index = options.index(prev_choice) if prev_choice in options else 0
 
             chosen = st.selectbox(
                 "Delete row",
                 options=options,
                 key="delete_row_select",
                 label_visibility="collapsed",
+                index=default_index,
             )
             if chosen and chosen != sentinel:
                 st.session_state.delete_row_id = option_map.get(chosen, "")
             else:
                 st.session_state.delete_row_id = ""
         else:
-            # Clear any stale selection if there are no candidates.
-            try:
-                st.session_state["delete_row_select"] = ""
-            except Exception:
-                pass
             st.session_state.delete_row_id = ""
             st.caption("Delete row")
     except Exception:
@@ -2074,7 +2070,6 @@ with col_del_btn:
 
                 save_data(df_updated, message="Row deleted")
                 st.session_state.delete_row_id = ""
-                st.session_state.delete_row_select = ""
                 st.rerun()
             except Exception as e:
                 st.error(f"Error deleting row: {e}")
