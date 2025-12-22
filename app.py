@@ -2071,7 +2071,7 @@ with col_del_pick:
         st.caption("Delete row")
 
 with col_del_btn:
-    if st.button("🗑️", key="delete_row_btn", help="Delete selected row"):
+    if st.button("⌫", key="delete_row_btn", help="Delete selected row"):
         rid = str(st.session_state.get("delete_row_id", "") or "").strip()
         if not rid:
             st.warning("Select a row to delete")
