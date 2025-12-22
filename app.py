@@ -90,6 +90,17 @@ st.markdown(
     [data-testid="stHeader"] {{
         background-color: {COLORS['bg_primary']} !important;
     }}
+
+    /* Hide GitHub/logo link in Streamlit header (Streamlit Cloud toolbar) */
+    [data-testid="stToolbar"] a[href*="github.com"],
+    [data-testid="stToolbar"] a[aria-label*="View source"],
+    [data-testid="stToolbar"] a[title*="View source"],
+    [data-testid="stToolbar"] a[aria-label*="GitHub"],
+    [data-testid="stToolbar"] a[title*="GitHub"],
+    [data-testid="stToolbar"] button[aria-label*="View source"],
+    [data-testid="stToolbar"] button[title*="View source"] {{
+        display: none !important;
+    }}
     
     /* Professional main container */
     .main {{
