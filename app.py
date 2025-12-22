@@ -683,12 +683,60 @@ def _get_service_account_info_from_secrets(secrets_obj) -> dict:
         "or `gcp_service_account_json`."
     )
 
+
+def _open_spreadsheet(client, spreadsheet_ref: str):
+    """Open a spreadsheet by URL or by key/id.
+
+    `spreadsheet_ref` may be:
+    - Full URL: https://docs.google.com/spreadsheets/d/<ID>/edit
+    - Just the ID/key: <ID>
+    """
+    ref = (spreadsheet_ref or "").strip()
+    if not ref:
+        raise ValueError("Missing `spreadsheet_url`. Paste the Google Sheet URL or its Spreadsheet ID.")
+    if ref.startswith("http://") or ref.startswith("https://"):
+        return client.open_by_url(ref)
+    # Looks like a spreadsheet key/id
+    return client.open_by_key(ref)
+
+
+def _validate_service_account_info(info: dict) -> list[str]:
+    missing: list[str] = []
+    if not isinstance(info, dict) or not info:
+        return ["gcp_service_account"]
+    required = ["type", "project_id", "private_key", "client_email"]
+    for k in required:
+        if not str(info.get(k, "")).strip():
+            missing.append(k)
+    return missing
+
 # Try to connect to Google Sheets if credentials are available
 if GSHEETS_AVAILABLE:
     try:
         # Check if running on Streamlit Cloud with secrets
-        if hasattr(st, 'secrets') and (('gcp_service_account' in st.secrets) or ('gcp_service_account_json' in st.secrets)):
-            service_account_info = _normalize_service_account_info(_get_service_account_info_from_secrets(st.secrets))
+        service_account_info = None
+        spreadsheet_ref = ""
+
+        if hasattr(st, 'secrets'):
+            if (('gcp_service_account' in st.secrets) or ('gcp_service_account_json' in st.secrets)):
+                service_account_info = _normalize_service_account_info(_get_service_account_info_from_secrets(st.secrets))
+            spreadsheet_ref = str(st.secrets.get("spreadsheet_url", "") or "").strip()
+
+        # Optional env-var support (useful for local runs or advanced deployments)
+        if not service_account_info:
+            env_json = os.getenv("GCP_SERVICE_ACCOUNT_JSON", "").strip()
+            if env_json:
+                try:
+                    service_account_info = _normalize_service_account_info(json.loads(env_json))
+                except Exception as e:
+                    raise ValueError("GCP_SERVICE_ACCOUNT_JSON is set but is not valid JSON.") from e
+        if not spreadsheet_ref:
+            spreadsheet_ref = os.getenv("SPREADSHEET_URL", "").strip()
+
+        if service_account_info:
+            missing_fields = _validate_service_account_info(service_account_info)
+            if missing_fields:
+                raise ValueError(f"Service account is missing required fields: {', '.join(missing_fields)}")
 
             # Basic validation to provide clearer errors than "Invalid base64..."
             pk = str(service_account_info.get("private_key", ""))
@@ -723,10 +771,9 @@ if GSHEETS_AVAILABLE:
             )
             gsheet_client = gspread.authorize(credentials)
             
-            # Get the spreadsheet URL from secrets
-            spreadsheet_url = st.secrets.get("spreadsheet_url", "")
-            if spreadsheet_url:
-                spreadsheet = gsheet_client.open_by_url(spreadsheet_url)
+            # Open spreadsheet by URL or ID
+            if spreadsheet_ref:
+                spreadsheet = _open_spreadsheet(gsheet_client, spreadsheet_ref)
                 gsheet_worksheet = spreadsheet.sheet1
                 USE_GOOGLE_SHEETS = True
                 st.sidebar.success("☁️ Connected to Google Sheets")
@@ -768,6 +815,81 @@ if GSHEETS_AVAILABLE:
 
         st.sidebar.error(f"⚠️ Google Sheets connection failed: {msg}{hint}{diag_text}")
         USE_GOOGLE_SHEETS = False
+
+        # Simple guided help (no secrets displayed)
+        with st.sidebar.expander("✅ Quick setup (simple)", expanded=False):
+            st.markdown(
+                "Use **one secret** instead of many fields:\n"
+                "- Add `spreadsheet_url` (full URL or just the sheet ID)\n"
+                "- Add `gcp_service_account_json` (paste the FULL service account JSON)\n\n"
+                "Example (Streamlit Cloud → Settings → Secrets):"
+            )
+            st.code(
+                'spreadsheet_url = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit"\n\n'
+                'gcp_service_account_json = """{\n'
+                '  "type": "service_account",\n'
+                '  "project_id": "...",\n'
+                '  "private_key_id": "...",\n'
+                '  "private_key": "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n",\n'
+                '  "client_email": "...",\n'
+                '  "client_id": "...",\n'
+                '  "auth_uri": "https://accounts.google.com/o/oauth2/auth",\n'
+                '  "token_uri": "https://oauth2.googleapis.com/token",\n'
+                '  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",\n'
+                '  "client_x509_cert_url": "..."\n'
+                '}"""\n',
+                language="toml",
+            )
+            st.markdown(
+                "Also ensure:\n"
+                "- The Google Sheet is **shared** with the service account email (Editor)\n"
+                "- Google Sheets API + Google Drive API are enabled in Google Cloud"
+            )
+
+        # Optional: one-click test button (re-runs same logic and shows a concise result)
+        if st.sidebar.button("🔎 Test Google Sheets connection", key="test_gsheets_connection"):
+            try:
+                if not GSHEETS_AVAILABLE:
+                    raise RuntimeError("Google Sheets packages are not installed.")
+
+                # Re-read secrets/env inside the button click
+                _sa = None
+                _ref = ""
+                if hasattr(st, 'secrets'):
+                    if (('gcp_service_account' in st.secrets) or ('gcp_service_account_json' in st.secrets)):
+                        _sa = _normalize_service_account_info(_get_service_account_info_from_secrets(st.secrets))
+                    _ref = str(st.secrets.get("spreadsheet_url", "") or "").strip()
+                if not _sa:
+                    env_json = os.getenv("GCP_SERVICE_ACCOUNT_JSON", "").strip()
+                    if env_json:
+                        _sa = _normalize_service_account_info(json.loads(env_json))
+                if not _ref:
+                    _ref = os.getenv("SPREADSHEET_URL", "").strip()
+
+                if not _sa:
+                    raise ValueError("Missing service account secret. Add [gcp_service_account] or gcp_service_account_json.")
+                missing = _validate_service_account_info(_sa)
+                if missing:
+                    raise ValueError(f"Service account missing fields: {', '.join(missing)}")
+
+                _pk = str(_sa.get("private_key", ""))
+                if "BEGIN PRIVATE KEY" not in _pk or "END PRIVATE KEY" not in _pk:
+                    raise ValueError("private_key missing BEGIN/END markers")
+
+                _creds = Credentials.from_service_account_info(
+                    _sa,
+                    scopes=[
+                        "https://www.googleapis.com/auth/spreadsheets",
+                        "https://www.googleapis.com/auth/drive"
+                    ],
+                )
+                _client = gspread.authorize(_creds)
+                _sheet = _open_spreadsheet(_client, _ref)
+                _ws = _sheet.sheet1
+                _ = _ws.row_values(1)
+                st.sidebar.success("✅ Test OK: connected and read the sheet")
+            except Exception as test_e:
+                st.sidebar.error(f"❌ Test failed: {test_e}")
 
 # Helper functions for Google Sheets
 @st.cache_data(ttl=30)  # Cache for 30 seconds to reduce API calls
