@@ -1576,7 +1576,17 @@ if 'REMINDER_ROW_ID' not in df_raw.columns:
     # Save IDs immediately - will use save_data after it's defined
     _needs_id_save = True
 else:
+    # Backfill missing/blank IDs so every row (including blank rows) can be targeted for delete/reminders.
     _needs_id_save = False
+    try:
+        rid_series = df_raw['REMINDER_ROW_ID'].astype(str)
+        missing_mask = df_raw['REMINDER_ROW_ID'].isna() | rid_series.str.strip().eq("") | rid_series.str.lower().eq("nan")
+        if bool(missing_mask.any()):
+            df_raw.loc[missing_mask, 'REMINDER_ROW_ID'] = [str(uuid.uuid4()) for _ in range(int(missing_mask.sum()))]
+            _needs_id_save = True
+    except Exception:
+        # If anything goes wrong, keep dashboard usable; IDs will be handled elsewhere.
+        pass
 
 if 'REMINDER_SNOOZE_UNTIL' not in df_raw.columns:
     df_raw['REMINDER_SNOOZE_UNTIL'] = pd.NA
@@ -1986,20 +1996,21 @@ with col_del_pick:
             candidates["REMINDER_ROW_ID"] = candidates["REMINDER_ROW_ID"].astype(str).replace("nan", "").fillna("")
 
         candidates = candidates[
-            (candidates.get("Patient Name", "").astype(str).str.strip() != "")
-            & (candidates.get("REMINDER_ROW_ID", "").astype(str).str.strip() != "")
+            (candidates.get("REMINDER_ROW_ID", "").astype(str).str.strip() != "")
         ]
 
         option_map: dict[str, str] = {}
         if not candidates.empty:
-            for _, r in candidates.iterrows():
+            for row_ix, r in candidates.iterrows():
                 rid = str(r.get("REMINDER_ROW_ID", "")).strip()
                 if not rid:
                     continue
-                pname = str(r.get("Patient Name", "")).strip()
+                pname_raw = str(r.get("Patient Name", "")).strip()
+                pname = pname_raw if pname_raw else "(blank row)"
                 in_t = str(r.get("In Time", "")).strip()
                 op = str(r.get("OP", "")).strip()
-                label = " · ".join([p for p in [pname, in_t, op] if p])
+                row_no = f"#{int(row_ix) + 1}" if str(row_ix).isdigit() else str(row_ix)
+                label = " · ".join([p for p in [row_no, pname, in_t, op] if p])
                 # Make option text unique even if labels repeat.
                 opt = f"{label} — {rid[:8]}" if label else rid[:8]
                 option_map[opt] = rid
@@ -2269,8 +2280,17 @@ if edited_all is not None:
                         # Handle Patient Name
                         patient_name = str(row["Patient Name"]).strip() if row["Patient Name"] and str(row["Patient Name"]) != "" else ""
                         if patient_name == "":
-                            # Clear entire row if patient name is empty
+                            # Clear row if patient name is empty, but preserve stable row id
+                            # so users can still delete the blank row from the dropdown.
                             for col in df_updated.columns:
+                                if col == "REMINDER_ROW_ID":
+                                    continue
+                                if col == "REMINDER_SNOOZE_UNTIL":
+                                    df_updated.iloc[orig_idx, df_updated.columns.get_loc(col)] = pd.NA
+                                    continue
+                                if col == "REMINDER_DISMISSED":
+                                    df_updated.iloc[orig_idx, df_updated.columns.get_loc(col)] = False
+                                    continue
                                 df_updated.iloc[orig_idx, df_updated.columns.get_loc(col)] = ""
                             continue
                         df_updated.iloc[orig_idx, df_updated.columns.get_loc("Patient Name")] = patient_name
