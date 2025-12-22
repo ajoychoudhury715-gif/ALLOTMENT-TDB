@@ -222,22 +222,28 @@ st.markdown(
     
     /* Alternating row background for better readability */
     [data-testid="stDataFrameContainer"] tbody tr:nth-child(even) {{
-        background-color: rgba(245, 245, 245, 0.6) !important;
+        background-color: rgba(201, 187, 176, 0.08) !important;
     }}
     
     [data-testid="stDataFrameContainer"] tbody tr:hover {{
-        background-color: rgba(201, 187, 176, 0.15) !important;
-        box-shadow: 0 2px 8px rgba(153, 88, 47, 0.1) inset !important;
-        transform: scaleY(1.02) !important;
+        background-color: rgba(201, 187, 176, 0.14) !important;
+        box-shadow: 0 2px 10px rgba(153, 88, 47, 0.10) inset !important;
     }}
     
     /* Premium Table Cells */
     [data-testid="stDataFrameContainer"] tbody td {{
-        padding: 15px 16px !important;
-        border-bottom: 1px solid #e5ddd0 !important;
-        font-size: 0.92rem !important;
+        padding: 12px 14px !important;
+        border-bottom: 1px solid rgba(201, 187, 176, 0.55) !important;
+        border-right: 1px solid rgba(201, 187, 176, 0.35) !important;
+        font-size: 0.93rem !important;
+        line-height: 1.25 !important;
+        vertical-align: middle !important;
         transition: all 0.2s ease !important;
         position: relative !important;
+    }}
+
+    [data-testid="stDataFrameContainer"] tbody td:last-child {{
+        border-right: none !important;
     }}
     
     /* Dropdown and Select Styling */
@@ -377,15 +383,15 @@ st.markdown(
     /* Data Frame Container - Premium & Beautiful */
     [data-testid="stDataFrameContainer"] {{
         background-color: {COLORS['bg_secondary']} !important;
-        border-radius: 10px !important;
-        border: 2px solid #d3c3b0 !important;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+        border-radius: 12px !important;
+        border: 1px solid rgba(201, 187, 176, 0.65) !important;
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
         overflow: hidden !important;
         transition: all 0.3s ease !important;
     }}
     
     [data-testid="stDataFrameContainer"]:hover {{
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+        box-shadow: 0 10px 26px rgba(0, 0, 0, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
     }}
     
     /* Tabs Styling */
