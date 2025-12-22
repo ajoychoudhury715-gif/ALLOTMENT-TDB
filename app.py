@@ -784,11 +784,70 @@ def _get_supabase_config_from_secrets_or_env():
 
 def _get_expected_columns():
     return [
-        "Patient Name", "In Time", "Out Time", "Procedure", "DR.",
+        "Patient ID", "Patient Name", "In Time", "Out Time", "Procedure", "DR.",
         "FIRST", "SECOND", "Third", "CASE PAPER", "OP",
         "SUCTION", "CLEANING", "STATUS", "REMINDER_ROW_ID",
         "REMINDER_SNOOZE_UNTIL", "REMINDER_DISMISSED",
     ]
+
+
+def _get_patients_config_from_secrets_or_env():
+    """Return (patients_table, id_col, name_col)."""
+    patients_table = "patients"
+    id_col = "id"
+    name_col = "name"
+
+    try:
+        if hasattr(st, 'secrets'):
+            patients_table = str(st.secrets.get("supabase_patients_table", patients_table) or patients_table).strip() or patients_table
+            id_col = str(st.secrets.get("supabase_patients_id_col", id_col) or id_col).strip() or id_col
+            name_col = str(st.secrets.get("supabase_patients_name_col", name_col) or name_col).strip() or name_col
+    except Exception:
+        pass
+
+    patients_table = os.getenv("SUPABASE_PATIENTS_TABLE", patients_table).strip() or patients_table
+    id_col = os.getenv("SUPABASE_PATIENTS_ID_COL", id_col).strip() or id_col
+    name_col = os.getenv("SUPABASE_PATIENTS_NAME_COL", name_col).strip() or name_col
+    return patients_table, id_col, name_col
+
+
+@st.cache_data(ttl=60)
+def search_patients_from_supabase(
+    _url: str,
+    _key: str,
+    _patients_table: str,
+    _id_col: str,
+    _name_col: str,
+    _query: str,
+    _limit: int = 50,
+):
+    """Search patients (id + name) from a Supabase table."""
+    try:
+        q = (_query or "").strip()
+        if not q:
+            return []
+        client = create_client(_url, _key)
+        # ilike is supported by PostgREST for Supabase.
+        resp = (
+            client.table(_patients_table)
+            .select(f"{_id_col},{_name_col}")
+            .ilike(_name_col, f"%{q}%")
+            .limit(_limit)
+            .execute()
+        )
+        data = getattr(resp, "data", None)
+        if not isinstance(data, list):
+            return []
+        out = []
+        for row in data:
+            pid = row.get(_id_col)
+            name = row.get(_name_col)
+            if pid is None or name is None:
+                continue
+            out.append({"id": str(pid), "name": str(name)})
+        return out
+    except Exception:
+        return []
 
 
 @st.cache_data(ttl=30)
@@ -1401,6 +1460,9 @@ current_min = now.hour * 60 + now.minute
 
 # ================ Reminder Persistence Setup ================
 # Add stable row IDs and reminder columns if they don't exist
+if 'Patient ID' not in df_raw.columns:
+    df_raw['Patient ID'] = ""
+
 if 'REMINDER_ROW_ID' not in df_raw.columns:
     df_raw['REMINDER_ROW_ID'] = [str(uuid.uuid4()) for _ in range(len(df_raw))]
     # Save IDs immediately - will use save_data after it's defined
@@ -1752,11 +1814,44 @@ st.markdown("### 📅 Full Today's Schedule")
 
 # Add new patient button and save button
 col1, col2, col3 = st.columns([0.15, 0.15, 0.7])
+
+# Selected patient from external patient DB (optional)
+if "selected_patient_id" not in st.session_state:
+    st.session_state.selected_patient_id = ""
+if "selected_patient_name" not in st.session_state:
+    st.session_state.selected_patient_name = ""
+
+with col3:
+    if USE_SUPABASE and SUPABASE_AVAILABLE:
+        try:
+            sup_url, sup_key, _, _ = _get_supabase_config_from_secrets_or_env()
+            patients_table, id_col, name_col = _get_patients_config_from_secrets_or_env()
+
+            patient_query = st.text_input("Search patient", value="", key="patient_search")
+            results = search_patients_from_supabase(
+                sup_url, sup_key, patients_table, id_col, name_col, patient_query, 50
+            )
+            options = [(p["id"], p["name"]) for p in results]
+            if options:
+                chosen = st.selectbox(
+                    "Select patient",
+                    options=options,
+                    format_func=lambda x: f"{x[0]} - {x[1]}",
+                    key="patient_select",
+                )
+                if chosen:
+                    st.session_state.selected_patient_id = chosen[0]
+                    st.session_state.selected_patient_name = chosen[1]
+        except Exception:
+            # If patient DB isn't configured, keep manual entry flow.
+            pass
+
 with col1:
     if st.button("➕ Add Patient", width="stretch"):
         # Create a new empty row
         new_row = {
-            "Patient Name": "",
+            "Patient ID": str(st.session_state.selected_patient_id or "").strip(),
+            "Patient Name": str(st.session_state.selected_patient_name or "").strip(),
             "In Time": None,
             "Out Time": None,
             "Procedure": "",
@@ -1789,7 +1884,7 @@ with col2:
             st.error(f"Error saving: {e}")
 
 all_sorted = df
-display_all = all_sorted[["Patient Name", "In Time Obj", "Out Time Obj", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "OP", "SUCTION", "CLEANING", "STATUS"]].copy()
+display_all = all_sorted[["Patient ID", "Patient Name", "In Time Obj", "Out Time Obj", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "OP", "SUCTION", "CLEANING", "STATUS"]].copy()
 display_all = display_all.rename(columns={"In Time Obj": "In Time", "Out Time Obj": "Out Time"})
 # Preserve original index for mapping edits back to df_raw
 display_all["_orig_idx"] = display_all.index
@@ -1799,6 +1894,9 @@ display_all = display_all.reset_index(drop=True)
 for col in ["Patient Name", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "OP", "STATUS"]:
     if col in display_all.columns:
         display_all[col] = display_all[col].astype(str).replace('nan', '')
+
+if "Patient ID" in display_all.columns:
+    display_all["Patient ID"] = display_all["Patient ID"].astype(str).replace('nan', '')
 
 # Keep In Time and Out Time as time objects for proper display
 display_all["In Time"] = display_all["In Time"].apply(lambda v: v if isinstance(v, time) else None)
@@ -1811,6 +1909,7 @@ edited_all = st.data_editor(
     hide_index=True,
     column_config={
         "_orig_idx": None,  # Hide the original index column
+        "Patient ID": st.column_config.TextColumn(label="Patient ID"),
         "Patient Name": st.column_config.TextColumn(label="Patient Name"),
         "In Time": st.column_config.TimeColumn(label="In Time", format="hh:mm A"),
         "Out Time": st.column_config.TimeColumn(label="Out Time", format="hh:mm A"),
@@ -1891,6 +1990,13 @@ if edited_all is not None:
                 
                 if orig_idx < len(df_updated):
                     try:
+                        # Handle Patient ID (optional)
+                        if "Patient ID" in row.index and "Patient ID" in df_updated.columns:
+                            pid = str(row.get("Patient ID", "")).strip()
+                            if pid.lower() in {"nan", "none"}:
+                                pid = ""
+                            df_updated.iloc[orig_idx, df_updated.columns.get_loc("Patient ID")] = pid
+
                         # Handle Patient Name
                         patient_name = str(row["Patient Name"]).strip() if row["Patient Name"] and str(row["Patient Name"]) != "" else ""
                         if patient_name == "":
@@ -1955,7 +2061,7 @@ if unique_ops:
                 (df["OP"] == op)
                 & ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE", na=True)
             ]
-            display_op = op_df[["Patient Name", "In Time Obj", "Out Time Obj", "Procedure", "DR.", "OP", "FIRST", "SECOND", "Third", "CASE PAPER", "SUCTION", "CLEANING", "STATUS"]].copy()
+            display_op = op_df[["Patient ID", "Patient Name", "In Time Obj", "Out Time Obj", "Procedure", "DR.", "OP", "FIRST", "SECOND", "Third", "CASE PAPER", "SUCTION", "CLEANING", "STATUS"]].copy()
             display_op = display_op.rename(columns={"In Time Obj": "In Time", "Out Time Obj": "Out Time"})
             # Preserve original index for mapping edits back to df_raw
             display_op["_orig_idx"] = display_op.index
@@ -1971,6 +2077,7 @@ if unique_ops:
                 hide_index=True,
                 column_config={
                     "_orig_idx": None,
+                    "Patient ID": st.column_config.TextColumn(label="Patient ID", required=False),
                     "In Time": st.column_config.TimeColumn(label="In Time", format="hh:mm A"),
                     "Out Time": st.column_config.TimeColumn(label="Out Time", format="hh:mm A"),
                     "DR.": st.column_config.SelectboxColumn(
@@ -2039,6 +2146,11 @@ if unique_ops:
                             orig_idx = int(orig_idx)
                             if orig_idx < 0 or orig_idx >= len(df_updated):
                                 continue
+
+                            # Patient ID
+                            patient_id = str(row.get("Patient ID", "")).strip()
+                            if "Patient ID" in df_updated.columns:
+                                df_updated.iloc[orig_idx, df_updated.columns.get_loc("Patient ID")] = patient_id
 
                             # Patient Name
                             patient_name = str(row.get("Patient Name", "")).strip()
