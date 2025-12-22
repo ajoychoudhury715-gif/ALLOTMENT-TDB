@@ -822,28 +822,31 @@ def search_patients_from_supabase(
     _limit: int = 50,
 ):
     """Search patients (id + name) from a Supabase table."""
-    try:
-        q = (_query or "").strip()
-        client = create_client(_url, _key)
+    q = (_query or "").strip()
+    client = create_client(_url, _key)
 
-        # PostgREST supports ilike and order.
-        query = client.table(_patients_table).select(f"{_id_col},{_name_col}")
-        if q:
-            query = query.ilike(_name_col, f"%{q}%")
-        resp = query.order(_name_col).limit(_limit).execute()
-        data = getattr(resp, "data", None)
-        if not isinstance(data, list):
-            return []
-        out = []
-        for row in data:
-            pid = row.get(_id_col)
-            name = row.get(_name_col)
-            if pid is None or name is None:
-                continue
-            out.append({"id": str(pid), "name": str(name)})
-        return out
-    except Exception:
+    # PostgREST supports ilike and order.
+    query = client.table(_patients_table).select(f"{_id_col},{_name_col}")
+    if q:
+        query = query.ilike(_name_col, f"%{q}%")
+    resp = query.order(_name_col).limit(_limit).execute()
+
+    # supabase-py may return an object with .error (depending on version)
+    err = getattr(resp, "error", None)
+    if err:
+        raise RuntimeError(str(err))
+
+    data = getattr(resp, "data", None)
+    if not isinstance(data, list):
         return []
+    out = []
+    for row in data:
+        pid = row.get(_id_col)
+        name = row.get(_name_col)
+        if pid is None or name is None:
+            continue
+        out.append({"id": str(pid), "name": str(name)})
+    return out
 
 
 @st.cache_data(ttl=30)
@@ -1819,48 +1822,54 @@ if "selected_patient_name" not in st.session_state:
 
 with col3:
     if USE_SUPABASE and SUPABASE_AVAILABLE:
+        sup_url, sup_key, _, _ = _get_supabase_config_from_secrets_or_env()
+        patients_table, id_col, name_col = _get_patients_config_from_secrets_or_env()
+
+        patient_query = st.text_input(
+            "Search patient name",
+            value="",
+            key="patient_search",
+            help="Type a name and press Enter (or click outside) to refresh results.",
+        )
+
+        q = str(patient_query or "").strip()
         try:
-            sup_url, sup_key, _, _ = _get_supabase_config_from_secrets_or_env()
-            patients_table, id_col, name_col = _get_patients_config_from_secrets_or_env()
-
-            patient_query = st.text_input(
-                "Search patient name",
-                value="",
-                key="patient_search",
-                help="Type a name and press Enter (or click outside) to refresh results.",
-            )
-
-            q = str(patient_query or "").strip()
             results = search_patients_from_supabase(
                 sup_url, sup_key, patients_table, id_col, name_col, q, 50
             )
+        except Exception as e:
+            st.warning(
+                "Patient search is not connected. "
+                f"Error: {e}\n\n"
+                f"Check Supabase table/columns: {patients_table}({id_col}, {name_col}). "
+                "If you are using an anon key, RLS may block reads; add `supabase_service_role_key` in Secrets "
+                "or create an RLS policy for the patients table."
+            )
+            results = []
 
-            if results:
-                # Use string options with a blank first choice so Streamlit doesn't auto-select a patient.
-                option_map = {f"{p['id']} - {p['name']}": (p["id"], p["name"]) for p in results}
-                option_strings = [""] + list(option_map.keys())
+        if results:
+            # Use string options with a blank first choice so Streamlit doesn't auto-select a patient.
+            option_map = {f"{p['id']} - {p['name']}": (p["id"], p["name"]) for p in results}
+            option_strings = [""] + list(option_map.keys())
 
-                chosen_str = st.selectbox(
-                    "Matches",
-                    options=option_strings,
-                    key="patient_select",
-                )
-                if chosen_str and chosen_str in option_map:
-                    pid, pname = option_map[chosen_str]
-                    st.session_state.selected_patient_id = str(pid)
-                    st.session_state.selected_patient_name = str(pname)
-            elif q:
-                st.caption("No matches")
-            else:
-                st.caption("Showing patient list")
+            chosen_str = st.selectbox(
+                "Matches",
+                options=option_strings,
+                key="patient_select",
+            )
+            if chosen_str and chosen_str in option_map:
+                pid, pname = option_map[chosen_str]
+                st.session_state.selected_patient_id = str(pid)
+                st.session_state.selected_patient_name = str(pname)
+        elif q:
+            st.caption("No matches")
+        else:
+            st.caption("Showing patient list")
 
-            if st.session_state.selected_patient_id or st.session_state.selected_patient_name:
-                st.caption(
-                    f"Selected: {st.session_state.selected_patient_id} - {st.session_state.selected_patient_name}"
-                )
-        except Exception:
-            # If patient DB isn't configured, keep manual entry flow.
-            pass
+        if st.session_state.selected_patient_id or st.session_state.selected_patient_name:
+            st.caption(
+                f"Selected: {st.session_state.selected_patient_id} - {st.session_state.selected_patient_name}"
+            )
 
 with col1:
     if st.button("➕ Add Patient", width="stretch"):
