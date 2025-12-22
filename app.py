@@ -1559,8 +1559,24 @@ if st.session_state.get("enable_reminders", True):
         # Skip if snoozed or already reminded
         if row_id in st.session_state.snoozed or row_id in st.session_state.reminder_sent:
             continue
+
+        assistants = ", ".join(
+            [
+                a
+                for a in [
+                    str(row.get("FIRST", "")).strip(),
+                    str(row.get("SECOND", "")).strip(),
+                    str(row.get("Third", "")).strip(),
+                ]
+                if a and a.lower() not in {"nan", "none"}
+            ]
+        )
+        assistants_text = f" | Assist: {assistants}" if assistants else ""
         
-        st.toast(f"🔔 Reminder: {patient} in ~{mins_left} min at {row['In Time Str']} with {row.get('DR.','')} (OP {row.get('OP','')})", icon="🔔")
+        st.toast(
+            f"🔔 Reminder: {patient} in ~{mins_left} min at {row['In Time Str']} with {row.get('DR.','')} (OP {row.get('OP','')}){assistants_text}",
+            icon="🔔",
+        )
         st.session_state.reminder_sent.add(row_id)
     
     # Reminder management UI
@@ -1577,9 +1593,24 @@ if st.session_state.get("enable_reminders", True):
                     continue
                 patient = row.get('Patient Name', 'Unknown')
                 mins_left = int(row["In_min"] - current_min)
+
+                assistants = ", ".join(
+                    [
+                        a
+                        for a in [
+                            str(row.get("FIRST", "")).strip(),
+                            str(row.get("SECOND", "")).strip(),
+                            str(row.get("Third", "")).strip(),
+                        ]
+                        if a and a.lower() not in {"nan", "none"}
+                    ]
+                )
+                assistants_text = f" — Assist: {assistants}" if assistants else ""
                 
                 col1, col2, col3, col4, col5 = st.columns([4,1,1,1,1])
-                col1.markdown(f"**{patient}** — {row.get('Procedure','')} (in ~{mins_left} min at {row.get('In Time Str','')})")  
+                col1.markdown(
+                    f"**{patient}** — {row.get('Procedure','')} (in ~{mins_left} min at {row.get('In Time Str','')}){assistants_text}"
+                )  
                 
                 default_snooze = int(st.session_state.get("default_snooze", 5))
                 if col2.button(f"💤 {default_snooze}min", key=f"snooze_{_safe_key(row_id)}_default"):
