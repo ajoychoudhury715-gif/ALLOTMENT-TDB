@@ -8,6 +8,7 @@ import zipfile  # for BadZipFile exception handling
 import hashlib
 import re  # for creating safe keys for buttons
 import uuid  # for generating stable row IDs
+import json
 
 # Google Sheets integration for persistent cloud storage
 try:
@@ -599,6 +600,11 @@ def _normalize_service_account_info(raw_info: dict) -> dict:
     if isinstance(private_key, str):
         # Strip surrounding whitespace
         private_key = private_key.strip()
+        # Handle accidental bytes-literal formatting: b'...'
+        if (private_key.startswith("b'") and private_key.endswith("'")) or (
+            private_key.startswith('b"') and private_key.endswith('"')
+        ):
+            private_key = private_key[2:-1]
         # Convert escaped newlines into real newlines if needed
         if "\\n" in private_key and "\n" not in private_key:
             private_key = private_key.replace("\\n", "\n")
@@ -609,18 +615,99 @@ def _normalize_service_account_info(raw_info: dict) -> dict:
             private_key.startswith("'") and private_key.endswith("'")
         ):
             private_key = private_key[1:-1]
+
+        # If the key is multi-line, strip per-line indentation/spaces.
+        # Streamlit Secrets UI and some editors sometimes add leading spaces.
+        if "\n" in private_key:
+            lines = private_key.split("\n")
+            cleaned_lines: list[str] = []
+            for line in lines:
+                if not line:
+                    cleaned_lines.append("")
+                    continue
+                stripped = line.strip()
+                # Remove interior spaces from base64 lines (but not header/footer)
+                if not stripped.startswith("-----BEGIN") and not stripped.startswith("-----END"):
+                    stripped = stripped.replace(" ", "")
+                cleaned_lines.append(stripped)
+            private_key = "\n".join(cleaned_lines).strip("\n")
+
+        # If BEGIN/END are present but the key is pasted on one line, force newlines.
+        # This frequently happens when pasting into Streamlit Secrets.
+        if "BEGIN PRIVATE KEY" in private_key and "END PRIVATE KEY" in private_key:
+            private_key = re.sub(r"-----BEGIN PRIVATE KEY-----\s*", "-----BEGIN PRIVATE KEY-----\n", private_key)
+            private_key = re.sub(r"\s*-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----", private_key)
+            private_key = re.sub(r"\n{3,}", "\n\n", private_key)
+            if not private_key.endswith("\n"):
+                private_key += "\n"
         info["private_key"] = private_key
     return info
+
+
+def _get_service_account_info_from_secrets(secrets_obj) -> dict:
+    """Support multiple Streamlit secrets shapes.
+
+    Supported:
+    - [gcp_service_account] table (dict)
+    - gcp_service_account_json = "{...}" (string containing JSON)
+    - gcp_service_account = "{...}" (string containing JSON)
+    """
+    if not secrets_obj:
+        raise ValueError("Streamlit secrets are not available.")
+
+    if "gcp_service_account" in secrets_obj:
+        sa = secrets_obj["gcp_service_account"]
+        if isinstance(sa, dict):
+            return sa
+        if isinstance(sa, str):
+            try:
+                return json.loads(sa)
+            except Exception as e:
+                raise ValueError(
+                    "`gcp_service_account` is present but is not a table/dict and is not valid JSON. "
+                    "Prefer using a TOML table: [gcp_service_account]."
+                ) from e
+
+    if "gcp_service_account_json" in secrets_obj:
+        sa_json = secrets_obj.get("gcp_service_account_json")
+        if isinstance(sa_json, str) and sa_json.strip():
+            try:
+                return json.loads(sa_json)
+            except Exception as e:
+                raise ValueError(
+                    "`gcp_service_account_json` is not valid JSON. Paste the full service account JSON exactly."
+                ) from e
+
+    raise ValueError(
+        "Missing Google service account secrets. Add a [gcp_service_account] section (recommended) "
+        "or `gcp_service_account_json`."
+    )
 
 # Try to connect to Google Sheets if credentials are available
 if GSHEETS_AVAILABLE:
     try:
         # Check if running on Streamlit Cloud with secrets
-        if hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
-            service_account_info = _normalize_service_account_info(st.secrets["gcp_service_account"])
+        if hasattr(st, 'secrets') and (('gcp_service_account' in st.secrets) or ('gcp_service_account_json' in st.secrets)):
+            service_account_info = _normalize_service_account_info(_get_service_account_info_from_secrets(st.secrets))
 
             # Basic validation to provide clearer errors than "Invalid base64..."
             pk = str(service_account_info.get("private_key", ""))
+            # Safe diagnostics (no secret values) to help users self-debug Streamlit secrets.
+            _sa_diag = {
+                "has_type": bool(str(service_account_info.get("type", "")).strip()),
+                "type": str(service_account_info.get("type", ""))[:40],
+                "has_client_email": bool(str(service_account_info.get("client_email", "")).strip()),
+                "has_project_id": bool(str(service_account_info.get("project_id", "")).strip()),
+                "private_key_len": len(pk) if isinstance(pk, str) else 0,
+                "private_key_has_begin": "BEGIN PRIVATE KEY" in pk,
+                "private_key_has_end": "END PRIVATE KEY" in pk,
+            }
+
+            if _sa_diag["type"] and _sa_diag["type"] != "service_account":
+                raise ValueError(
+                    "Secrets do not look like a Google *service account* JSON (type is not 'service_account'). "
+                    "Make sure you downloaded a Service Account key (JSON) from Google Cloud Console."
+                )
             if "BEGIN PRIVATE KEY" not in pk or "END PRIVATE KEY" not in pk:
                 raise ValueError(
                     "Service account private_key is missing BEGIN/END markers. "
@@ -653,7 +740,33 @@ if GSHEETS_AVAILABLE:
                 "or an extra character. Re-download a NEW JSON key from Google Cloud and paste the `private_key` "
                 "using TOML triple quotes (\"\"\")."
             )
-        st.sidebar.error(f"⚠️ Google Sheets connection failed: {msg}{hint}")
+        elif "No key could be detected" in msg or "Could not deserialize key data" in msg:
+            hint = (
+                "\n\nHint: Your `private_key` value is not being parsed as a valid PEM key. "
+                "In Streamlit secrets, paste `private_key` as a multiline TOML string using triple quotes (\"\"\"). "
+                "Make sure it contains the exact lines '-----BEGIN PRIVATE KEY-----' and '-----END PRIVATE KEY-----'."
+            )
+        # Add safe diagnostics to reduce guesswork without exposing secrets.
+        diag_text = ""
+        try:
+            if 'service_account_info' in locals() and isinstance(service_account_info, dict):
+                pk_local = str(service_account_info.get("private_key", ""))
+                diag = {
+                    "has_gcp_service_account": True,
+                    "type": str(service_account_info.get("type", ""))[:40],
+                    "has_client_email": bool(str(service_account_info.get("client_email", "")).strip()),
+                    "has_project_id": bool(str(service_account_info.get("project_id", "")).strip()),
+                    "private_key_len": len(pk_local),
+                    "has_begin": "BEGIN PRIVATE KEY" in pk_local,
+                    "has_end": "END PRIVATE KEY" in pk_local,
+                }
+                diag_text = "\n\nDiagnostics (safe): " + ", ".join([f"{k}={v}" for k, v in diag.items()])
+            else:
+                diag_text = "\n\nDiagnostics (safe): has_gcp_service_account=False"
+        except Exception:
+            pass
+
+        st.sidebar.error(f"⚠️ Google Sheets connection failed: {msg}{hint}{diag_text}")
         USE_GOOGLE_SHEETS = False
 
 # Helper functions for Google Sheets
