@@ -824,17 +824,13 @@ def search_patients_from_supabase(
     """Search patients (id + name) from a Supabase table."""
     try:
         q = (_query or "").strip()
-        if not q:
-            return []
         client = create_client(_url, _key)
-        # ilike is supported by PostgREST for Supabase.
-        resp = (
-            client.table(_patients_table)
-            .select(f"{_id_col},{_name_col}")
-            .ilike(_name_col, f"%{q}%")
-            .limit(_limit)
-            .execute()
-        )
+
+        # PostgREST supports ilike and order.
+        query = client.table(_patients_table).select(f"{_id_col},{_name_col}")
+        if q:
+            query = query.ilike(_name_col, f"%{q}%")
+        resp = query.order(_name_col).limit(_limit).execute()
         data = getattr(resp, "data", None)
         if not isinstance(data, list):
             return []
@@ -1835,12 +1831,8 @@ with col3:
             )
 
             q = str(patient_query or "").strip()
-            results = (
-                search_patients_from_supabase(
-                    sup_url, sup_key, patients_table, id_col, name_col, q, 50
-                )
-                if q
-                else []
+            results = search_patients_from_supabase(
+                sup_url, sup_key, patients_table, id_col, name_col, q, 50
             )
 
             if results:
@@ -1859,6 +1851,8 @@ with col3:
                     st.session_state.selected_patient_name = str(pname)
             elif q:
                 st.caption("No matches")
+            else:
+                st.caption("Showing patient list")
 
             if st.session_state.selected_patient_id or st.session_state.selected_patient_name:
                 st.caption(

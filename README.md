@@ -69,6 +69,28 @@ supabase_key = "YOUR_SUPABASE_ANON_KEY"
 
 The app will store the whole schedule in a single row (`id = "main"`) as JSON.
 
+##### (Optional) Patient Master List (Supabase)
+
+If you have a patient database (id + name) and want the app to show a patient list while searching, create a `patients` table in Supabase:
+
+```sql
+create table if not exists patients (
+   id text primary key,
+   name text not null
+);
+
+create index if not exists patients_name_idx on patients (name);
+```
+
+Secrets (only needed if you used different names):
+
+```toml
+# Optional: patient list table/columns
+# supabase_patients_table = "patients"
+# supabase_patients_id_col = "id"
+# supabase_patients_name_col = "name"
+```
+
 #### Option 1B: Google Sheets (Alternative)
 
 1. **Create a Google Sheet**
