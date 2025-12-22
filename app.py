@@ -127,25 +127,31 @@ st.markdown(
     /* Upcoming rows - Light blue */
     [data-testid="stDataFrameContainer"] tbody tr:has(td:contains("WAITING")) {{
         background: linear-gradient(90deg, rgba(59, 130, 246, 0.3) 0%, rgba(59, 130, 246, 0.1) 100%) !important;
-        border-left: 5px solid #3b82f6 !important;
+        border-left: 5px solid {COLORS['info']} !important;
     }}
     
     /* Ongoing rows - Light green */
     [data-testid="stDataFrameContainer"] tbody tr:has(td:contains("ON GOING")) {{
         background: linear-gradient(90deg, rgba(16, 185, 129, 0.3) 0%, rgba(16, 185, 129, 0.1) 100%) !important;
-        border-left: 5px solid #10b981 !important;
+        border-left: 5px solid {COLORS['success']} !important;
     }}
     
     /* Arrived rows - Light yellow */
     [data-testid="stDataFrameContainer"] tbody tr:has(td:contains("ARRIVED")) {{
         background: linear-gradient(90deg, rgba(245, 158, 11, 0.3) 0%, rgba(245, 158, 11, 0.1) 100%) !important;
-        border-left: 5px solid #f59e0b !important;
+        border-left: 5px solid {COLORS['warning']} !important;
+    }}
+
+    /* Shifted rows - Yellow */
+    [data-testid="stDataFrameContainer"] tbody tr:has(td:contains("SHIFTED")) {{
+        background: linear-gradient(90deg, rgba(245, 158, 11, 0.3) 0%, rgba(245, 158, 11, 0.1) 100%) !important;
+        border-left: 5px solid {COLORS['warning']} !important;
     }}
     
     /* Cancelled rows - Light red */
     [data-testid="stDataFrameContainer"] tbody tr:has(td:contains("CANCELLED")) {{
         background: linear-gradient(90deg, rgba(239, 68, 68, 0.3) 0%, rgba(239, 68, 68, 0.1) 100%) !important;
-        border-left: 5px solid #ef4444 !important;
+        border-left: 5px solid {COLORS['danger']} !important;
     }}
     
     /* Enhanced Hover effect with shadow lift */
@@ -160,6 +166,11 @@ st.markdown(
     }}
     
     [data-testid="stDataFrameContainer"] tbody tr:has(td:contains("ARRIVED")):hover {{
+        background: linear-gradient(90deg, rgba(245, 158, 11, 0.5) 0%, rgba(245, 158, 11, 0.2) 100%) !important;
+        box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3) inset !important;
+    }}
+
+    [data-testid="stDataFrameContainer"] tbody tr:has(td:contains("SHIFTED")):hover {{
         background: linear-gradient(90deg, rgba(245, 158, 11, 0.5) 0%, rgba(245, 158, 11, 0.2) 100%) !important;
         box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3) inset !important;
     }}
@@ -1803,7 +1814,7 @@ edited_all = st.data_editor(
         "CLEANING": st.column_config.CheckboxColumn(label="🧹 CLEANING"),
         "STATUS": st.column_config.SelectboxColumn(
             label="STATUS",
-            options=["WAITING", "ARRIVED", "ON GOING", "CANCELLED"],
+            options=["WAITING", "ARRIVED", "ON GOING", "CANCELLED", "SHIFTED"],
             required=False
         )
     }
@@ -1956,7 +1967,7 @@ if unique_ops:
                     ),
                     "STATUS": st.column_config.SelectboxColumn(
                         label="STATUS",
-                        options=["WAITING", "ARRIVED", "ON GOING", "CANCELLED"],
+                        options=["WAITING", "ARRIVED", "ON GOING", "CANCELLED", "SHIFTED"],
                         required=False
                     )
                 }
