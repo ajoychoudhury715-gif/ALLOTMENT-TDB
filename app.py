@@ -1415,13 +1415,13 @@ def _should_pause_autorefresh_for_editing() -> bool:
     return any(_data_editor_has_pending_edits(k) for k in keys)
 
 
-# Auto-refresh every 30 seconds to support 30-second snoozes.
+# Auto-refresh every 60 seconds when idle.
 # Pause while editing so the table stays stable and doesn't interrupt typing.
 _pause_autorefresh = bool(st.session_state.get("pause_autorefresh_while_editing", True)) and _should_pause_autorefresh_for_editing()
 if _pause_autorefresh:
     st.caption("⏸ Auto-refresh paused while editing")
 else:
-    st_autorefresh(interval=30000, debounce=True, key="autorefresh")
+    st_autorefresh(interval=60000, debounce=True, key="autorefresh")
 
 # ================ Load Data ================
 df_raw = None
