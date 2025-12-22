@@ -1579,14 +1579,14 @@ if st.session_state.get("enable_reminders", True):
     expired = [rid for rid, until in list(st.session_state.snoozed.items()) if until <= now_epoch]
     for rid in expired:
         del st.session_state.snoozed[rid]
-        _persist_reminder_to_storage(rid, None, False)
+        # Don't persist clears on natural expiry; we'll overwrite when re-snoozing.
     
     # Find patients needing reminders (0-15 min before In Time)
     reminder_df = df[
         (df["In_min"].notna()) &
         (df["In_min"] - current_min > 0) &
         (df["In_min"] - current_min <= 15) &
-        ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE|SHIFTED", na=True)
+        ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE|SHIFTED|ARRIVED|ON GOING|ONGOING", na=True)
     ].copy()
     
     # Show toast for new reminders (not snoozed, not dismissed)
@@ -1597,7 +1597,7 @@ if st.session_state.get("enable_reminders", True):
         patient = row.get("Patient Name", "Unknown")
         mins_left = int(row["In_min"] - current_min)
         
-        # Skip if snoozed (still active) or already reminded
+        # Skip if snoozed (still active) or dismissed
         snooze_until = st.session_state.snoozed.get(row_id)
         if (snooze_until is not None and snooze_until > now_epoch) or (row_id in st.session_state.reminder_sent):
             continue
@@ -1619,7 +1619,11 @@ if st.session_state.get("enable_reminders", True):
             f"🔔 Reminder: {patient} in ~{mins_left} min at {row['In Time Str']} with {row.get('DR.','')} (OP {row.get('OP','')}){assistants_text}",
             icon="🔔",
         )
-        st.session_state.reminder_sent.add(row_id)
+
+        # Auto-snooze for 30 seconds, and re-alert until status changes.
+        next_until = now_epoch + 30
+        st.session_state.snoozed[row_id] = next_until
+        _persist_reminder_to_storage(row_id, next_until, False)
     
     # Reminder management UI
     def _safe_key(s):
