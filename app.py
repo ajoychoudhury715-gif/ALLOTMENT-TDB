@@ -8,9 +8,18 @@ import zipfile  # for BadZipFile exception handling
 import hashlib
 import re  # for creating safe keys for buttons
 import uuid  # for generating stable row IDs
+
+# Google Sheets integration for persistent cloud storage
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    GSHEETS_AVAILABLE = True
+except ImportError:
+    GSHEETS_AVAILABLE = False
+
 # To install required packages, run in your terminal:
 # pip install --upgrade pip
-# pip install pandas openpyxl streamlit streamlit-autorefresh
+# pip install pandas openpyxl streamlit streamlit-autorefresh gspread google-auth
 # pip install streamlit
 
 # Additional import for auto-refresh (optional)
@@ -571,41 +580,127 @@ with st.sidebar:
     st.selectbox("Default snooze (minutes)", options=[5,10,15,30], index=0, key="default_snooze")
     st.write("💡 Reminders alert 15 minutes before a patient's In Time.")
 
-# File check using absolute path
-file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Putt Allotment.xlsx")
-if not os.path.exists(file_path):
-    st.error(f"⚠️ 'Putt Allotment.xlsx' not found in the same folder as this script: {file_path}. Place the file there and restart.")
-    st.stop()
+# ================ Data Storage Configuration ================
+# Determine whether to use Google Sheets (cloud) or local Excel file
+USE_GOOGLE_SHEETS = False
+gsheet_client = None
+gsheet_worksheet = None
+
+# Try to connect to Google Sheets if credentials are available
+if GSHEETS_AVAILABLE:
+    try:
+        # Check if running on Streamlit Cloud with secrets
+        if hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
+            credentials = Credentials.from_service_account_info(
+                st.secrets["gcp_service_account"],
+                scopes=[
+                    "https://www.googleapis.com/auth/spreadsheets",
+                    "https://www.googleapis.com/auth/drive"
+                ]
+            )
+            gsheet_client = gspread.authorize(credentials)
+            
+            # Get the spreadsheet URL from secrets
+            spreadsheet_url = st.secrets.get("spreadsheet_url", "")
+            if spreadsheet_url:
+                spreadsheet = gsheet_client.open_by_url(spreadsheet_url)
+                gsheet_worksheet = spreadsheet.sheet1
+                USE_GOOGLE_SHEETS = True
+                st.sidebar.success("☁️ Connected to Google Sheets")
+    except Exception as e:
+        st.sidebar.warning(f"⚠️ Google Sheets connection failed: {str(e)[:50]}...")
+        USE_GOOGLE_SHEETS = False
+
+# Helper functions for Google Sheets
+@st.cache_data(ttl=30)  # Cache for 30 seconds to reduce API calls
+def load_data_from_gsheets(_worksheet):
+    """Load data from Google Sheets worksheet"""
+    try:
+        data = _worksheet.get_all_records()
+        if not data:
+            # Return empty dataframe with expected columns
+            return pd.DataFrame(columns=[
+                "Patient Name", "In Time", "Out Time", "Procedure", "DR.", 
+                "FIRST", "SECOND", "Third", "CASE PAPER", "OP", 
+                "SUCTION", "CLEANING", "STATUS", "REMINDER_ROW_ID",
+                "REMINDER_SNOOZE_UNTIL", "REMINDER_DISMISSED"
+            ])
+        df = pd.DataFrame(data)
+        return df
+    except Exception as e:
+        st.error(f"Error loading from Google Sheets: {e}")
+        return None
+
+def save_data_to_gsheets(worksheet, df):
+    """Save dataframe to Google Sheets worksheet"""
+    try:
+        # Clear existing data
+        worksheet.clear()
+        
+        # Convert dataframe to list of lists for gspread
+        # Handle NaN/None values
+        df_clean = df.fillna("")
+        
+        # Convert all values to strings to avoid serialization issues
+        for col in df_clean.columns:
+            df_clean[col] = df_clean[col].astype(str).replace('nan', '').replace('None', '').replace('NaT', '')
+        
+        # Write headers
+        headers = df_clean.columns.tolist()
+        
+        # Write data
+        values = [headers] + df_clean.values.tolist()
+        worksheet.update(values, 'A1')
+        
+        # Clear the cache so next load gets fresh data
+        load_data_from_gsheets.clear()
+        return True
+    except Exception as e:
+        st.error(f"Error saving to Google Sheets: {e}")
+        return False
 
 # Auto-refresh every 60 seconds (with countdown visible)
 st_autorefresh(interval=60000, debounce=True, key="autorefresh")
 
-# Load raw data (fresh every run for real-time accuracy)
-# Retry logic to handle temporary file corruption during concurrent writes
-max_retries = 3
-retry_delay = 0.5  # seconds
+# ================ Load Data ================
 df_raw = None
 
-for attempt in range(max_retries):
-    try:
-        df_raw = pd.read_excel(file_path, sheet_name="Sheet1")
-        break  # Success, exit retry loop
-    except (zipfile.BadZipFile, Exception) as e:
-        if "BadZipFile" in str(type(e).__name__) or "Truncated" in str(e) or "corrupt" in str(e).lower():
-            if attempt < max_retries - 1:
-                time_module.sleep(retry_delay)  # Wait before retry
-                continue
+if USE_GOOGLE_SHEETS:
+    # Load from Google Sheets
+    df_raw = load_data_from_gsheets(gsheet_worksheet)
+    if df_raw is None:
+        st.error("⚠️ Failed to load data from Google Sheets.")
+        st.stop()
+else:
+    # Fallback to local Excel file
+    file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Putt Allotment.xlsx")
+    if not os.path.exists(file_path):
+        st.error(f"⚠️ 'Putt Allotment.xlsx' not found. For cloud deployment, configure Google Sheets in Streamlit secrets.")
+        st.info("💡 See README for Google Sheets setup instructions.")
+        st.stop()
+    
+    # Retry logic to handle temporary file corruption during concurrent writes
+    max_retries = 3
+    retry_delay = 0.5  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            df_raw = pd.read_excel(file_path, sheet_name="Sheet1")
+            break  # Success, exit retry loop
+        except (zipfile.BadZipFile, Exception) as e:
+            if "BadZipFile" in str(type(e).__name__) or "Truncated" in str(e) or "corrupt" in str(e).lower():
+                if attempt < max_retries - 1:
+                    time_module.sleep(retry_delay)  # Wait before retry
+                    continue
+                else:
+                    st.error("⚠️ The Excel file appears to be corrupted or is being modified.")
+                    st.stop()
             else:
-                st.error("⚠️ The Excel file appears to be corrupted or is being modified. Please try refreshing the page in a few seconds.")
-                st.info("💡 If this persists, check if the 'Putt Allotment.xlsx' file is valid and not open in another application.")
-                st.stop()
-        else:
-            # Re-raise non-corruption related errors
-            raise e
-
-if df_raw is None:
-    st.error("⚠️ Failed to load the Excel file after multiple attempts.")
-    st.stop()
+                raise e
+    
+    if df_raw is None:
+        st.error("⚠️ Failed to load the Excel file after multiple attempts.")
+        st.stop()
 
 # Clean column names
 df_raw.columns = [col.strip() for col in df_raw.columns]
@@ -855,13 +950,10 @@ current_min = now.hour * 60 + now.minute
 # Add stable row IDs and reminder columns if they don't exist
 if 'REMINDER_ROW_ID' not in df_raw.columns:
     df_raw['REMINDER_ROW_ID'] = [str(uuid.uuid4()) for _ in range(len(df_raw))]
-    # Save IDs immediately
-    try:
-        with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
-            df_raw.to_excel(writer, sheet_name='Sheet1', index=False)
-        st.toast("🆔 Generated stable row IDs for reminders", icon="✅")
-    except Exception:
-        pass
+    # Save IDs immediately - will use save_data after it's defined
+    _needs_id_save = True
+else:
+    _needs_id_save = False
 
 if 'REMINDER_SNOOZE_UNTIL' not in df_raw.columns:
     df_raw['REMINDER_SNOOZE_UNTIL'] = pd.NA
@@ -892,21 +984,42 @@ df.loc[df["Out_min"] < df["In_min"], "Out_min"] += 1440
 # Mark ongoing
 df["Is_Ongoing"] = (df["In_min"] <= current_min) & (current_min <= df["Out_min"])
 
+# ================ Unified Save Function ================
+def save_data(dataframe, show_toast=True, message="Data saved!"):
+    """Save dataframe to Google Sheets or Excel based on configuration"""
+    try:
+        if USE_GOOGLE_SHEETS:
+            success = save_data_to_gsheets(gsheet_worksheet, dataframe)
+            if success and show_toast:
+                st.toast(f"☁️ {message}", icon="✅")
+            return success
+        else:
+            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                dataframe.to_excel(writer, sheet_name='Sheet1', index=False)
+            if show_toast:
+                st.toast(f"💾 {message}", icon="✅")
+            return True
+    except Exception as e:
+        st.error(f"Error saving data: {e}")
+        return False
+
 # Helper to persist reminder state
-def _persist_reminder_to_excel(row_id, until, dismissed):
-    """Persist snooze/dismiss fields back to Excel by row ID."""
+def _persist_reminder_to_storage(row_id, until, dismissed):
+    """Persist snooze/dismiss fields back to storage by row ID."""
     try:
         match = df_raw[df_raw.get('REMINDER_ROW_ID') == row_id]
         if not match.empty:
             ix = match.index[0]
             df_raw.at[ix, 'REMINDER_SNOOZE_UNTIL'] = int(until) if until is not None else pd.NA
             df_raw.at[ix, 'REMINDER_DISMISSED'] = bool(dismissed)
-            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
-                df_raw.to_excel(writer, sheet_name='Sheet1', index=False)
-            return True
+            return save_data(df_raw, show_toast=False)
     except Exception as e:
         st.error(f"Error persisting reminder: {e}")
     return False
+
+# Save reminder IDs if they were just generated
+if _needs_id_save:
+    save_data(df_raw, message="Generated stable row IDs for reminders")
 
 # ================ Change Detection & Notifications ================
 if 'prev_hash' not in st.session_state:
@@ -985,7 +1098,7 @@ if st.session_state.get("enable_reminders", True):
     expired = [rid for rid, until in list(st.session_state.snoozed.items()) if until <= current_min]
     for rid in expired:
         del st.session_state.snoozed[rid]
-        _persist_reminder_to_excel(rid, None, False)
+        _persist_reminder_to_storage(rid, None, False)
     
     # Find patients needing reminders (0-15 min before In Time)
     reminder_df = df[
@@ -1033,7 +1146,7 @@ if st.session_state.get("enable_reminders", True):
                     until = current_min + default_snooze
                     st.session_state.snoozed[row_id] = until
                     st.session_state.reminder_sent.discard(row_id)
-                    _persist_reminder_to_excel(row_id, until, False)
+                    _persist_reminder_to_storage(row_id, until, False)
                     st.toast(f"😴 Snoozed {patient} for {default_snooze} min", icon="💤")
                     st.rerun()
                     
@@ -1041,7 +1154,7 @@ if st.session_state.get("enable_reminders", True):
                     until = current_min + 5
                     st.session_state.snoozed[row_id] = until
                     st.session_state.reminder_sent.discard(row_id)
-                    _persist_reminder_to_excel(row_id, until, False)
+                    _persist_reminder_to_storage(row_id, until, False)
                     st.toast(f"😴 Snoozed {patient} for 5 min", icon="💤")
                     st.rerun()
                     
@@ -1049,13 +1162,13 @@ if st.session_state.get("enable_reminders", True):
                     until = current_min + 10
                     st.session_state.snoozed[row_id] = until
                     st.session_state.reminder_sent.discard(row_id)
-                    _persist_reminder_to_excel(row_id, until, False)
+                    _persist_reminder_to_storage(row_id, until, False)
                     st.toast(f"😴 Snoozed {patient} for 10 min", icon="💤")
                     st.rerun()
                     
                 if col5.button("🗑️", key=f"dismiss_{_safe_key(row_id)}"):
                     st.session_state.reminder_sent.add(row_id)
-                    _persist_reminder_to_excel(row_id, None, True)
+                    _persist_reminder_to_storage(row_id, None, True)
                     st.toast(f"✅ Dismissed reminder for {patient}", icon="✅")
                     st.rerun()
             
@@ -1073,7 +1186,7 @@ if st.session_state.get("enable_reminders", True):
                             c1.write(f"🕐 {name} — {remaining} min remaining")
                             if c2.button("Cancel", key=f"cancel_{_safe_key(row_id)}"):
                                 del st.session_state.snoozed[row_id]
-                                _persist_reminder_to_excel(row_id, None, False)
+                                _persist_reminder_to_storage(row_id, None, False)
                                 st.toast(f"✅ Cancelled snooze for {name}", icon="✅")
                                 st.rerun()
 
@@ -1146,19 +1259,15 @@ with col1:
         # Append to the original dataframe
         new_row_df = pd.DataFrame([new_row])
         df_raw_with_new = pd.concat([df_raw, new_row_df], ignore_index=True)
-        # Save immediately to Excel
-        with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
-            df_raw_with_new.to_excel(writer, sheet_name="Sheet1", index=False)
-        st.toast("✅ New patient row added with WAITING status!", icon="➕")
+        # Save immediately
+        save_data(df_raw_with_new, message="New patient row added!")
         st.rerun()
 
 with col2:
     if st.button("💾 Save", width="stretch", key="manual_save_btn"):
         try:
-            # Manually save current data to Excel
-            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
-                df_raw.to_excel(writer, sheet_name="Sheet1", index=False)
-            st.toast("💾 Data saved successfully!", icon="✅")
+            # Manually save current data
+            save_data(df_raw, message="Data saved successfully!")
         except Exception as e:
             st.error(f"Error saving: {e}")
 
@@ -1320,15 +1429,12 @@ if edited_all is not None:
                         st.warning(f"Warning updating row {orig_idx}: {str(col_error)}")
                         continue
             
-            # Write back to Excel
-            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
-                df_updated.to_excel(writer, sheet_name="Sheet1", index=False)
-            
-            st.toast("✅ Schedule updated in Excel!", icon="💾")
+            # Write back to storage
+            save_data(df_updated, message="Schedule updated!")
             # Auto-refresh all views after saving
             st.rerun()
         except Exception as e:
-            st.error(f"Error saving to Excel: {e}")
+            st.error(f"Error saving: {e}")
 
 # ================ Per Chair Tabs ================
 st.markdown("###  Schedule by OP")
