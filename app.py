@@ -825,18 +825,63 @@ def search_patients_from_supabase(
     q = (_query or "").strip()
     client = create_client(_url, _key)
 
+    def _run(_id: str, _name: str):
+        query = client.table(_patients_table).select(f"{_id},{_name}")
+        if q:
+            query = query.ilike(_name, f"%{q}%")
+        resp = query.order(_name).limit(_limit).execute()
+        err = getattr(resp, "error", None)
+        if err:
+            raise RuntimeError(str(err))
+        return getattr(resp, "data", None)
+
     # PostgREST supports ilike and order.
-    query = client.table(_patients_table).select(f"{_id_col},{_name_col}")
-    if q:
-        query = query.ilike(_name_col, f"%{q}%")
-    resp = query.order(_name_col).limit(_limit).execute()
+    try:
+        data = _run(_id_col, _name_col)
+    except Exception as e:
+        # Common case: columns are not named exactly `id`/`name`.
+        # Postgres error code for unknown column is 42703.
+        err_text = str(e)
+        if "42703" not in err_text and "does not exist" not in err_text:
+            raise
 
-    # supabase-py may return an object with .error (depending on version)
-    err = getattr(resp, "error", None)
-    if err:
-        raise RuntimeError(str(err))
+        id_candidates = [
+            _id_col,
+            "patient_id",
+            "patientid",
+            "uhid",
+            "pid",
+        ]
+        name_candidates = [
+            _name_col,
+            "patient_name",
+            "patientname",
+            "full_name",
+            "fullname",
+            "name",
+        ]
 
-    data = getattr(resp, "data", None)
+        last_err: Exception | None = None
+        data = None
+        for cid in id_candidates:
+            for cname in name_candidates:
+                if not cid or not cname:
+                    continue
+                try:
+                    data = _run(cid, cname)
+                    # If we got data successfully, switch output mapping to these columns.
+                    _id_col = cid
+                    _name_col = cname
+                    last_err = None
+                    break
+                except Exception as inner:
+                    last_err = inner
+                    continue
+            if last_err is None and data is not None:
+                break
+        if data is None:
+            raise last_err if last_err is not None else e
+
     if not isinstance(data, list):
         return []
     out = []
