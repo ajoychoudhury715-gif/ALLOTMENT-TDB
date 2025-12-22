@@ -1614,14 +1614,34 @@ df["Out Time Obj"] = df["Out Time Str"].apply(safe_str_to_time_obj)
 # Convert checkbox columns (SUCTION, CLEANING) - checkmark or content to boolean
 def str_to_checkbox(val):
     """Convert string values to boolean for checkboxes"""
-    if pd.isna(val) or val == "" or val == "False":
+    # Preserve actual booleans
+    if isinstance(val, bool):
+        return val
+
+    # Handle numbers (0/1)
+    try:
+        if isinstance(val, (int, float)) and not pd.isna(val):
+            return bool(int(val))
+    except Exception:
+        pass
+
+    if pd.isna(val):
         return False
-    elif val == "✓" or str(val).strip().upper() == "TRUE":
+
+    s = str(val).strip()
+    if s == "":
+        return False
+
+    su = s.upper()
+    if su in {"FALSE", "F", "0", "NO", "N", "NONE", "NAN"}:
+        return False
+    if su in {"TRUE", "T", "1", "YES", "Y"}:
         return True
-    # Any other content is considered as True (was marked)
-    elif str(val).strip() != "":
+    if s == "✓":
         return True
-    return False
+
+    # Any other non-empty content is treated as checked (legacy behavior)
+    return True
 
 # Convert existing checkbox data
 if "SUCTION" in df.columns:
