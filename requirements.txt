@@ -32,6 +32,8 @@ six==1.17.0
 smmap==5.0.2
 streamlit==1.52.2
 streamlit-autorefresh==1.0.1
+gspread==6.1.4
+google-auth==2.38.0
 tenacity==9.1.2
 toml==0.10.2
 tornado==6.5.4

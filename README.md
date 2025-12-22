@@ -9,6 +9,7 @@ A **Streamlit-based real-time scheduling dashboard** for managing dental allotme
 - Status tracking (WAITING, ARRIVED, ON GOING, CANCELLED)
 - Doctor and staff assignments
 - Operation theater management
+- 🔔 **15-minute reminder notifications** before patient appointments
 
 🎨 **Premium UI Design**
 - Beautiful gradient interfaces
@@ -17,25 +18,64 @@ A **Streamlit-based real-time scheduling dashboard** for managing dental allotme
 - Responsive layout
 - Loading screen with animated spinner
 
+☁️ **Cloud-Ready**
+- **Google Sheets integration** for persistent cloud storage
+- Works on Streamlit Cloud without data loss
+- Falls back to local Excel file for development
+- Real-time sync across all users
+
 📊 **Data Management**
-- Excel integration (Putt Allotment.xlsx)
+- Excel integration (local development)
+- Google Sheets integration (production)
 - Live data editing
 - Automatic save functionality
 - Change detection with notifications
 - Toast notifications for status updates
 
-## Installation
+## Deployment Options
 
-### Prerequisites
-- Python 3.8 or higher
-- Git
-- pip (Python package manager)
+### Option 1: Streamlit Cloud (Recommended for Production)
 
-### Setup
+1. **Create a Google Sheet**
+   - Go to [Google Sheets](https://sheets.google.com) and create a new spreadsheet
+   - Add these column headers in row 1:
+     `Patient Name, In Time, Out Time, Procedure, DR., FIRST, SECOND, Third, CASE PAPER, OP, SUCTION, CLEANING, STATUS`
+   - Copy the spreadsheet URL
+
+2. **Set up Google Cloud Service Account**
+   - Go to [Google Cloud Console](https://console.cloud.google.com)
+   - Create a new project or select an existing one
+   - Enable **Google Sheets API** and **Google Drive API**
+   - Go to *APIs & Services > Credentials > Create Credentials > Service Account*
+   - Create a key for the service account (JSON format)
+   - **Important**: Share your Google Sheet with the service account email (with Editor access)
+
+3. **Deploy to Streamlit Cloud**
+   - Go to [share.streamlit.io](https://share.streamlit.io) and sign in
+   - Click "New app" and select this repository
+   - In app settings, go to **Secrets** and add:
+   ```toml
+   spreadsheet_url = "https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID/edit"
+   
+   [gcp_service_account]
+   type = "service_account"
+   project_id = "your-project-id"
+   private_key_id = "your-private-key-id"
+   private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+   client_email = "your-service-account@your-project-id.iam.gserviceaccount.com"
+   client_id = "your-client-id"
+   auth_uri = "https://accounts.google.com/o/oauth2/auth"
+   token_uri = "https://oauth2.googleapis.com/token"
+   auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+   client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/..."
+   ```
+   - Click Deploy!
+
+### Option 2: Local Development
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+git clone https://github.com/ajoychoudhury715-gif/ALLOTMENT-TDB.git
 cd ALLOTMENT-TDB
 ```
 
