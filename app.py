@@ -1934,17 +1934,21 @@ with col3:
         sup_url, sup_key, _, _ = _get_supabase_config_from_secrets_or_env()
         patients_table, id_col, name_col = _get_patients_config_from_secrets_or_env()
 
-        patient_query = st.text_input(
-            "Search patient name",
-            value="",
-            key="patient_search",
-            help="Type a name and press Enter (or click outside) to refresh results.",
-        )
+        s_col, m_col = st.columns([0.55, 0.45], vertical_alignment="bottom")
+
+        with s_col:
+            patient_query = st.text_input(
+                "Patient search",
+                value="",
+                key="patient_search",
+                placeholder="Search patient…",
+                label_visibility="collapsed",
+            )
 
         q = str(patient_query or "").strip()
         try:
             results = search_patients_from_supabase(
-                sup_url, sup_key, patients_table, id_col, name_col, q, 50
+                sup_url, sup_key, patients_table, id_col, name_col, q, 20
             )
         except Exception as e:
             err_text = str(e)
@@ -1983,24 +1987,27 @@ with col3:
                 )
             results = []
 
-        if results:
-            # Use string options with a blank first choice so Streamlit doesn't auto-select a patient.
-            option_map = {f"{p['id']} - {p['name']}": (p["id"], p["name"]) for p in results}
-            option_strings = [""] + list(option_map.keys())
+        with m_col:
+            if results:
+                # Use string options with a blank first choice so Streamlit doesn't auto-select a patient.
+                option_map = {f"{p['name']} · {p['id']}": (p["id"], p["name"]) for p in results}
+                option_strings = [""] + list(option_map.keys())
 
-            chosen_str = st.selectbox(
-                "Matches",
-                options=option_strings,
-                key="patient_select",
-            )
-            if chosen_str and chosen_str in option_map:
-                pid, pname = option_map[chosen_str]
-                st.session_state.selected_patient_id = str(pid)
-                st.session_state.selected_patient_name = str(pname)
-        elif q:
+                chosen_str = st.selectbox(
+                    "Matches",
+                    options=option_strings,
+                    key="patient_select",
+                    label_visibility="collapsed",
+                )
+                if chosen_str and chosen_str in option_map:
+                    pid, pname = option_map[chosen_str]
+                    st.session_state.selected_patient_id = str(pid)
+                    st.session_state.selected_patient_name = str(pname)
+            else:
+                st.caption("Matches")
+
+        if (not results) and q:
             st.caption("No matches")
-        else:
-            st.caption("Showing patient list")
 
         if st.session_state.selected_patient_id or st.session_state.selected_patient_name:
             st.caption(
