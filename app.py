@@ -3392,23 +3392,23 @@ with col_search:
         with m_col:
             if results:
                 option_map = {f"{p['name']} · {p['id']}": (p["id"], p["name"]) for p in results}
-                option_strings = [""] + list(option_map.keys())
+                option_strings = ["Select patient..."] + list(option_map.keys())
 
                 chosen_str = st.selectbox(
-                    "Matches",
+                    "Patient",
                     options=option_strings,
                     key="patient_select",
                     label_visibility="collapsed",
                 )
-                if chosen_str and chosen_str in option_map:
+                if chosen_str and chosen_str != "Select patient..." and chosen_str in option_map:
                     pid, pname = option_map[chosen_str]
                     st.session_state.selected_patient_id = str(pid)
                     st.session_state.selected_patient_name = str(pname)
             else:
-                st.caption("Matches")
-
-        if (not results) and q:
-            st.caption("No matches")
+                if q:
+                    st.caption("❌ No matches found")
+                else:
+                    st.caption("🔍 Type to search patients")
 
         if st.session_state.selected_patient_id or st.session_state.selected_patient_name:
             st.caption(
