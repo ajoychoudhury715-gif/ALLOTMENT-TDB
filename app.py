@@ -1378,19 +1378,6 @@ with st.sidebar:
 
 with st.sidebar:
     st.markdown("---")
-    st.markdown("## 🤖 Assistant Allocation")
-    st.checkbox(
-        "Auto-assign assistants on save",
-        value=True,
-        key="auto_assign_assistants",
-        help="Fills FIRST/SECOND/Third when doctor + times are set.",
-    )
-    st.checkbox(
-        "Only fill empty slots",
-        value=True,
-        key="auto_assign_only_empty",
-        help="Keeps any manual assignments you already chose.",
-    )
 
 # ================ Data Storage Configuration ================
 # Determine whether to use Google Sheets (cloud) or local Excel file
