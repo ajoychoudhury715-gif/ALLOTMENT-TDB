@@ -753,6 +753,48 @@ IST = timezone(timedelta(hours=5, minutes=30))
 now = datetime.now(IST)
 st.markdown(f" {now.strftime('%B %d, %Y - %I:%M:%S %p')} IST")
 
+
+def _get_app_version_short() -> str:
+    """Best-effort git/version identifier for display.
+
+    Streamlit Cloud does not guarantee a .git directory is present at runtime,
+    so we fall back to common CI env vars when available.
+    """
+    for key in (
+        "STREAMLIT_GIT_COMMIT",
+        "GIT_COMMIT",
+        "GITHUB_SHA",
+        "COMMIT_SHA",
+        "VERCEL_GIT_COMMIT_SHA",
+        "RENDER_GIT_COMMIT",
+        "CF_PAGES_COMMIT_SHA",
+    ):
+        val = (os.environ.get(key) or "").strip()
+        if val:
+            return val[:7]
+
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        head_path = os.path.join(base_dir, ".git", "HEAD")
+        if os.path.exists(head_path):
+            head = (open(head_path, "r", encoding="utf-8").read() or "").strip()
+            if head.startswith("ref:"):
+                ref_rel = head.split("ref:", 1)[1].strip()
+                ref_path = os.path.join(base_dir, ".git", *ref_rel.split("/"))
+                if os.path.exists(ref_path):
+                    sha = (open(ref_path, "r", encoding="utf-8").read() or "").strip()
+                    if sha:
+                        return sha[:7]
+            elif head:
+                return head[:7]
+    except Exception:
+        pass
+
+    return "unknown"
+
+
+st.caption(f"Version: {_get_app_version_short()}")
+
 # Epoch seconds (used for 30-second snooze timing)
 now_epoch = int(time_module.time())
 
