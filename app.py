@@ -3329,94 +3329,87 @@ with col_del_btn:
                 st.error(f"Error deleting row: {e}")
 
 with col_search:
-    # Split the search column into patient search and space
-    search_col, discard_col = st.columns([5, 0], vertical_alignment="bottom")
-    
-    with search_col:
-        if USE_SUPABASE and SUPABASE_AVAILABLE:
-            sup_url, sup_key, _, _ = _get_supabase_config_from_secrets_or_env()
-            patients_table, id_col, name_col = _get_patients_config_from_secrets_or_env()
+    # Patient search
+    if USE_SUPABASE and SUPABASE_AVAILABLE:
+        sup_url, sup_key, _, _ = _get_supabase_config_from_secrets_or_env()
+        patients_table, id_col, name_col = _get_patients_config_from_secrets_or_env()
 
-            patient_query = st.text_input(
-                "Patient search",
-                value="",
-                key="patient_search",
-                placeholder="Search patient…",
+        patient_query = st.text_input(
+            "Patient search",
+            value="",
+            key="patient_search",
+            placeholder="Search patient…",
+            label_visibility="collapsed",
+        )
+
+        q = str(patient_query or "").strip()
+        try:
+            results = search_patients_from_supabase(
+                sup_url, sup_key, patients_table, id_col, name_col, q, 20
+            )
+        except Exception as e:
+            err_text = str(e)
+            st.error("Patient search is not connected.")
+            st.caption(f"Error: {err_text}")
+
+            # Common case: table doesn't exist yet.
+            if "PGRST205" in err_text or "Could not find the table" in err_text:
+                with st.expander("✅ Fix: Create the patients table", expanded=True):
+                    st.markdown(
+                        "Your Supabase project does not have the patient master table yet. "
+                        "Create it in Supabase → SQL Editor, then reload the app."
+                    )
+                    st.code(
+                        "create table if not exists patients (\n"
+                        "  id text primary key,\n"
+                        "  name text not null\n"
+                        ");\n\n"
+                        "create index if not exists patients_name_idx on patients (name);\n",
+                        language="sql",
+                    )
+                    st.markdown(
+                        "If your patient table/columns have different names, set these in Streamlit Secrets:"
+                    )
+                    st.code(
+                        "supabase_patients_table = \"patients\"\n"
+                        "supabase_patients_id_col = \"id\"\n"
+                        "supabase_patients_name_col = \"name\"\n",
+                        language="toml",
+                    )
+            else:
+                st.warning(
+                    f"Check Supabase table/columns: {patients_table}({id_col}, {name_col}). "
+                    "If you are using an anon key, RLS may block reads; add `supabase_service_role_key` in Secrets "
+                    "or create an RLS policy for the patients table."
+                )
+            results = []
+
+        if results:
+            option_map = {f"{p['name']} · {p['id']}": (p["id"], p["name"]) for p in results}
+            option_strings = ["Select patient..."] + list(option_map.keys())
+
+            chosen_str = st.selectbox(
+                "Patient",
+                options=option_strings,
+                key="patient_select",
                 label_visibility="collapsed",
             )
-
-            q = str(patient_query or "").strip()
-            try:
-                results = search_patients_from_supabase(
-                    sup_url, sup_key, patients_table, id_col, name_col, q, 20
-                )
-            except Exception as e:
-                err_text = str(e)
-                st.error("Patient search is not connected.")
-                st.caption(f"Error: {err_text}")
-
-                # Common case: table doesn't exist yet.
-                if "PGRST205" in err_text or "Could not find the table" in err_text:
-                    with st.expander("✅ Fix: Create the patients table", expanded=True):
-                        st.markdown(
-                            "Your Supabase project does not have the patient master table yet. "
-                            "Create it in Supabase → SQL Editor, then reload the app."
-                        )
-                        st.code(
-                            "create table if not exists patients (\n"
-                            "  id text primary key,\n"
-                            "  name text not null\n"
-                            ");\n\n"
-                            "create index if not exists patients_name_idx on patients (name);\n",
-                            language="sql",
-                        )
-                        st.markdown(
-                            "If your patient table/columns have different names, set these in Streamlit Secrets:"
-                        )
-                        st.code(
-                            "supabase_patients_table = \"patients\"\n"
-                            "supabase_patients_id_col = \"id\"\n"
-                            "supabase_patients_name_col = \"name\"\n",
-                            language="toml",
-                        )
-                else:
-                    st.warning(
-                        f"Check Supabase table/columns: {patients_table}({id_col}, {name_col}). "
-                        "If you are using an anon key, RLS may block reads; add `supabase_service_role_key` in Secrets "
-                        "or create an RLS policy for the patients table."
-                    )
-                results = []
-
-            if results:
-                option_map = {f"{p['name']} · {p['id']}": (p["id"], p["name"]) for p in results}
-                option_strings = ["Select patient..."] + list(option_map.keys())
-
-                chosen_str = st.selectbox(
-                    "Patient",
-                    options=option_strings,
-                    key="patient_select",
-                    label_visibility="collapsed",
-                )
-                if chosen_str and chosen_str != "Select patient..." and chosen_str in option_map:
-                    pid, pname = option_map[chosen_str]
-                    st.session_state.selected_patient_id = str(pid)
-                    st.session_state.selected_patient_name = str(pname)
-            else:
-                if q:
-                    st.caption("❌ No matches found")
-                else:
-                    st.caption("🔍 Type to search patients")
-
-            if st.session_state.selected_patient_id or st.session_state.selected_patient_name:
-                st.caption(
-                    f"Selected: {st.session_state.selected_patient_id} - {st.session_state.selected_patient_name}"
-                )
+            if chosen_str and chosen_str != "Select patient..." and chosen_str in option_map:
+                pid, pname = option_map[chosen_str]
+                st.session_state.selected_patient_id = str(pid)
+                st.session_state.selected_patient_name = str(pname)
         else:
-            st.caption("🔍 Patient search (Supabase only)")
-    
+            if q:
+                st.caption("❌ No matches found")
+            else:
+                st.caption("🔍 Type to search patients")
 
-
-
+        if st.session_state.selected_patient_id or st.session_state.selected_patient_name:
+            st.caption(
+                f"Selected: {st.session_state.selected_patient_id} - {st.session_state.selected_patient_name}"
+            )
+    else:
+        st.caption("🔍 Patient search (Supabase only)")
 
 display_all = all_sorted[[
     "Patient Name",
