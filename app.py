@@ -2394,6 +2394,12 @@ else:
 # Clean column names
 df_raw.columns = [col.strip() for col in df_raw.columns]
 
+# Ensure metadata attribute exists (defensive check)
+if not hasattr(df_raw, 'attrs'):
+    df_raw.attrs = {}
+if "meta" not in df_raw.attrs:
+    df_raw.attrs["meta"] = {}
+
 # Load persisted time blocks (if present) from storage metadata
 _sync_time_blocks_from_meta(df_raw)
 
@@ -2683,6 +2689,13 @@ df["Is_Ongoing"] = (df["In_min"] <= current_min) & (current_min <= df["Out_min"]
 def save_data(dataframe, show_toast=True, message="Data saved!"):
     """Save dataframe to Google Sheets or Excel based on configuration"""
     try:
+        # Ensure metadata is updated with current time blocks before saving
+        if not hasattr(dataframe, 'attrs'):
+            dataframe.attrs = {}
+        meta = _get_meta_from_df(dataframe)
+        meta = _apply_time_blocks_to_meta(meta)
+        dataframe.attrs["meta"] = meta
+        
         if USE_SUPABASE:
             sup_url, sup_key, sup_table, sup_row = _get_supabase_config_from_secrets_or_env()
             success = save_data_to_supabase(sup_url, sup_key, sup_table, sup_row, dataframe)
