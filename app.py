@@ -3989,6 +3989,53 @@ with dept_tabs[2]:
 # ================ AUTO-ALLOCATION TOOL ================
 st.markdown("### 🤖 Auto-Allocate Assistants")
 
+# Auto-allocate all assistants button
+col_auto_all = st.columns(1)[0]
+with col_auto_all:
+    if st.button("🎯 Auto-Allocate All Assistants", key="auto_alloc_all_btn", use_container_width=True, type="primary"):
+        try:
+            df_temp = df_raw.copy()
+            allocation_count = 0
+            
+            for idx in range(len(df_temp)):
+                try:
+                    # Get doctor for this row
+                    doctor_cell = df_temp.iloc[idx, df_temp.columns.get_loc("DR.")] if "DR." in df_temp.columns else None
+                    status_cell = df_temp.iloc[idx, df_temp.columns.get_loc("STATUS")] if "STATUS" in df_temp.columns else ""
+                    
+                    # Only auto-allocate for non-cancelled, non-done rows
+                    status_norm = str(status_cell).strip().upper() if status_cell else ""
+                    if "CANCELLED" in status_norm or "DONE" in status_norm or "COMPLETED" in status_norm:
+                        continue
+                    
+                    # Check if FIRST or SECOND are already filled
+                    first_cell = df_temp.iloc[idx, df_temp.columns.get_loc("FIRST")] if "FIRST" in df_temp.columns else ""
+                    second_cell = df_temp.iloc[idx, df_temp.columns.get_loc("SECOND")] if "SECOND" in df_temp.columns else ""
+                    
+                    first_str = str(first_cell).strip() if first_cell else ""
+                    second_str = str(second_cell).strip() if second_cell else ""
+                    
+                    # Skip if both are already filled
+                    if first_str and second_str:
+                        continue
+                    
+                    # Try to auto-allocate
+                    _auto_fill_assistants_for_row(df_temp, idx, only_fill_empty=True)
+                    allocation_count += 1
+                except Exception:
+                    continue
+            
+            if allocation_count > 0:
+                save_data(df_temp, message=f"Auto-allocated assistants for {allocation_count} patients")
+                st.success(f"✅ Auto-allocated assistants for {allocation_count} patients")
+                st.rerun()
+            else:
+                st.info("No patients needed assistant allocation")
+        except Exception as e:
+            st.error(f"Error during auto-allocation: {e}")
+
+st.markdown("---")
+
 with st.expander("🔄 Automatic Assistant Allocation", expanded=False):
     st.caption("Automatically assign assistants based on department, doctor, and availability")
     
