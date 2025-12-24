@@ -3187,8 +3187,10 @@ def highlight_row(row):
     color = get_status_background(row["STATUS"])
     return [color for _ in row]
 
-# ================ Full Schedule ================
-st.markdown("### 📅 Full Today's Schedule")
+all_sorted = df
+
+# Manual save button and patient controls for schedule editor
+st.markdown("### 📋 Full Schedule")
 
 # Add new patient button and save button
 col_add, col_save, col_del_pick, col_del_btn, col_search = st.columns([0.20, 0.16, 0.18, 0.07, 0.39])
@@ -3234,17 +3236,12 @@ with col_add:
         st.rerun()
 
 with col_save:
-    if st.button(
-        "💾 Save",
-        key="manual_save_btn",
-        help="Save changes to storage",
-        use_container_width=True,
-    ):
-        try:
-            # Manually save current data
-            save_data(df_raw, message="Data saved successfully!")
-        except Exception as e:
-            st.error(f"Error saving: {e}")
+    # Save/Discard buttons for the data editor
+    if st.button("💾 Save Changes", key="manual_save_full", use_container_width=True, type="primary"):
+        st.session_state.manual_save_triggered = True
+    if st.button("🔄 Discard", key="manual_discard_full", use_container_width=True):
+        st.session_state.manual_save_triggered = False
+        st.rerun()
 
 with col_del_pick:
     # Compact delete row control (uses stable REMINDER_ROW_ID)
@@ -3418,18 +3415,7 @@ with col_search:
                 f"Selected: {st.session_state.selected_patient_id} - {st.session_state.selected_patient_name}"
             )
 
-all_sorted = df
 
-# Manual save button for schedule editor
-st.markdown("### 📋 Full Schedule")
-save_col1, save_col2, save_col3 = st.columns([2, 2, 6])
-with save_col1:
-    if st.button("💾 Save Changes", key="manual_save_full", use_container_width=True, type="primary"):
-        st.session_state.manual_save_triggered = True
-with save_col2:
-    if st.button("🔄 Discard", key="manual_discard_full", use_container_width=True):
-        st.session_state.manual_save_triggered = False
-        st.rerun()
 
 display_all = all_sorted[[
     "Patient Name",
