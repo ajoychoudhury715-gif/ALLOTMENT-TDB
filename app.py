@@ -3419,6 +3419,18 @@ with col_search:
             )
 
 all_sorted = df
+
+# Manual save button for schedule editor
+st.markdown("### 📋 Full Schedule")
+save_col1, save_col2, save_col3 = st.columns([2, 2, 6])
+with save_col1:
+    if st.button("💾 Save Changes", key="manual_save_full", use_container_width=True, type="primary"):
+        st.session_state.manual_save_triggered = True
+with save_col2:
+    if st.button("🔄 Discard", key="manual_discard_full", use_container_width=True):
+        st.session_state.manual_save_triggered = False
+        st.rerun()
+
 display_all = all_sorted[[
     "Patient Name",
     "In Time Obj",
@@ -3523,8 +3535,8 @@ edited_all = st.data_editor(
     }
 )
 
-# ================ Auto-save edited data to Excel ================
-if edited_all is not None:
+# ================ Manual save: process edits only when user clicks save button ================
+if st.session_state.get("manual_save_triggered") and edited_all is not None:
     # Compare non-time columns to detect changes (time columns need special handling due to object type)
     has_changes = False
     if not edited_all.equals(display_all):
@@ -3677,13 +3689,26 @@ if edited_all is not None:
             
             # Write back to storage
             save_data(df_updated, message="Schedule updated!")
-            # Auto-refresh all views after saving
+            # Reset save trigger and refresh
+            st.session_state.manual_save_triggered = False
             st.rerun()
         except Exception as e:
             st.error(f"Error saving: {e}")
+            st.session_state.manual_save_triggered = False
 
 # ================ Per Chair Tabs ================
 st.markdown("###  Schedule by OP")
+
+# Save button for OP editor
+op_save_col1, op_save_col2, op_save_col3 = st.columns([2, 2, 6])
+with op_save_col1:
+    if st.button("💾 Save OP Changes", key="manual_save_op", use_container_width=True, type="primary"):
+        st.session_state.manual_save_triggered = True
+with op_save_col2:
+    if st.button("🔄 Discard OP", key="manual_discard_op", use_container_width=True):
+        st.session_state.manual_save_triggered = False
+        st.rerun()
+
 unique_ops = sorted(df["OP"].dropna().unique())
 
 if unique_ops:
@@ -3776,8 +3801,8 @@ if unique_ops:
                 }
             )
 
-            # Persist edits from OP tabs (previously this editor had no save path)
-            if edited_op is not None:
+            # Persist edits from OP tabs (only on manual save)
+            if st.session_state.get("manual_save_triggered") and edited_op is not None:
                 op_has_changes = False
                 if not edited_op.equals(display_op):
                     for col in edited_op.columns:
