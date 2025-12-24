@@ -9,6 +9,7 @@ import hashlib
 import re  # for creating safe keys for buttons
 import uuid  # for generating stable row IDs
 import json
+import io
 
 # Supabase integration (Postgres) for persistent cloud storage (no Google)
 try:
@@ -2487,6 +2488,41 @@ def save_data(dataframe, show_toast=True, message="Data saved!"):
         return False
 
 
+def _build_schedule_backups(df_any: pd.DataFrame) -> tuple[bytes, bytes]:
+    """Return (csv_bytes, xlsx_bytes) for the current schedule."""
+    csv_bytes = df_any.to_csv(index=False).encode("utf-8")
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df_any.to_excel(writer, sheet_name="Sheet1", index=False)
+        # Include metadata (time blocks) if present
+        try:
+            meta = _apply_time_blocks_to_meta(_get_meta_from_df(df_any))
+            meta_rows = []
+            for k, v in meta.items():
+                if isinstance(v, (dict, list)):
+                    meta_rows.append({"key": str(k), "value": json.dumps(v)})
+                else:
+                    meta_rows.append({"key": str(k), "value": str(v)})
+            pd.DataFrame(meta_rows).to_excel(writer, sheet_name="Meta", index=False)
+        except Exception:
+            pass
+    xlsx_bytes = buf.getvalue()
+    return csv_bytes, xlsx_bytes
+
+
+def _make_cleared_schedule(df_existing: pd.DataFrame) -> pd.DataFrame:
+    """Create an empty schedule dataframe while preserving metadata (e.g., time blocks)."""
+    cols = list(df_existing.columns)
+    df_empty = pd.DataFrame(columns=cols)
+    try:
+        meta = _apply_time_blocks_to_meta(_get_meta_from_df(df_existing))
+        _set_meta_on_df(df_empty, meta)
+    except Exception:
+        pass
+    return df_empty
+
+
 # ================ TIME BLOCKING UI (persisted) ================
 with st.sidebar:
     st.markdown("---")
@@ -2547,6 +2583,76 @@ with st.sidebar:
                     st.rerun()
     else:
         st.caption("No time blocks set for today")
+
+
+# ================ RESET / CLEAR ALL ALLOTMENTS ================
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("## 🧹 Reset Schedule")
+    st.caption("Clear all current patient appointments/allotments (keeps time blocks).")
+
+    backup_name_base = f"tdb_allotment_backup_{now.strftime('%Y%m%d_%H%M')}"
+    try:
+        csv_bytes, xlsx_bytes = _build_schedule_backups(df_raw)
+        st.download_button(
+            "⬇️ Download backup (CSV)",
+            data=csv_bytes,
+            file_name=f"{backup_name_base}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+        st.download_button(
+            "⬇️ Download backup (Excel)",
+            data=xlsx_bytes,
+            file_name=f"{backup_name_base}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+    except Exception:
+        st.caption("Backup download unavailable.")
+
+    if "confirm_clear_all_check" not in st.session_state:
+        st.session_state.confirm_clear_all_check = False
+    if "confirm_clear_all_text" not in st.session_state:
+        st.session_state.confirm_clear_all_text = ""
+
+    st.checkbox(
+        "I understand this will delete ALL rows",
+        key="confirm_clear_all_check",
+    )
+    st.text_input(
+        "Type CLEAR to confirm",
+        key="confirm_clear_all_text",
+        placeholder="CLEAR",
+    )
+
+    if st.button(
+        "🧹 Clear All Allotments",
+        key="clear_all_allotments_btn",
+        use_container_width=True,
+        help="Permanently clears all current schedule rows",
+    ):
+        ok_check = bool(st.session_state.get("confirm_clear_all_check"))
+        ok_text = str(st.session_state.get("confirm_clear_all_text", "") or "").strip().upper() == "CLEAR"
+        if not (ok_check and ok_text):
+            st.warning("Please check the box and type CLEAR to confirm.")
+        else:
+            try:
+                df_cleared = _make_cleared_schedule(df_raw)
+                success = save_data(df_cleared, message="Schedule cleared")
+                if success:
+                    # Clear local notification/reminder state so we don't toast old rows.
+                    st.session_state.prev_hash = None
+                    st.session_state.prev_ongoing = set()
+                    st.session_state.prev_upcoming = set()
+                    st.session_state.prev_raw = pd.DataFrame()
+                    st.session_state.reminder_sent = set()
+                    st.session_state.snoozed = {}
+                    st.session_state.delete_row_id = ""
+                    st.toast("🧹 Schedule cleared", icon="✅")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Error clearing schedule: {e}")
 
 # Helper to persist reminder state
 def _persist_reminder_to_storage(row_id, until, dismissed):
