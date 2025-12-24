@@ -894,9 +894,9 @@ def get_assistant_schedule(assistant_name: str, df_schedule: pd.DataFrame) -> li
             if col in row.index:
                 val = str(row.get(col, "")).strip().upper()
                 if val == assist_upper:
-                    # Skip cancelled/done/shifted appointments
+                    # Skip cancelled/done/completed/shifted appointments
                     status = str(row.get("STATUS", "")).strip().upper()
-                    if any(s in status for s in ["CANCELLED", "DONE", "SHIFTED"]):
+                    if any(s in status for s in ["CANCELLED", "DONE", "COMPLETED", "SHIFTED"]):
                         continue
                     
                     appointments.append({
@@ -1370,7 +1370,49 @@ def _get_expected_columns():
         "FIRST", "SECOND", "Third", "CASE PAPER", "OP",
         "SUCTION", "CLEANING", "STATUS", "REMINDER_ROW_ID",
         "REMINDER_SNOOZE_UNTIL", "REMINDER_DISMISSED",
+        # Time tracking / status audit (stored in the same allotment table)
+        "STATUS_CHANGED_AT", "ACTUAL_START_AT", "ACTUAL_END_AT", "STATUS_LOG",
     ]
+
+
+# ================ PATIENT STATUS OPTIONS ================
+# Keep legacy values for compatibility with existing data.
+STATUS_BASE_OPTIONS = [
+    "PENDING",
+    "WAITING",
+    "ARRIVING",
+    "ARRIVED",
+    "ON GOING",
+    "DONE",
+    "COMPLETED",
+    "CANCELLED",
+    "SHIFTED",
+    "LATE",  # patient running late
+]
+
+
+def _now_ist_str() -> str:
+    return datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _append_status_log(existing_value, event: dict) -> str:
+    """Append a status change event to a JSON list stored in a cell."""
+    items: list[dict] = []
+    try:
+        if isinstance(existing_value, list):
+            items = [x for x in existing_value if isinstance(x, dict)]
+        elif isinstance(existing_value, str) and existing_value.strip():
+            parsed = json.loads(existing_value)
+            if isinstance(parsed, list):
+                items = [x for x in parsed if isinstance(x, dict)]
+    except Exception:
+        items = []
+
+    items.append(dict(event))
+    try:
+        return json.dumps(items, ensure_ascii=False)
+    except Exception:
+        return ""
 
 
 def _get_patients_config_from_secrets_or_env():
@@ -1559,6 +1601,14 @@ def load_data_from_supabase(_url: str, _key: str, _table: str, _row_id: str):
             return pd.DataFrame(columns=_get_expected_columns())
 
         columns = payload.get("columns") or _get_expected_columns()
+        # Ensure new expected columns are added for older saved payloads.
+        try:
+            expected = _get_expected_columns()
+            for col in expected:
+                if col not in columns:
+                    columns.append(col)
+        except Exception:
+            pass
         rows = payload.get("rows") or []
         df = pd.DataFrame(rows)
         # Ensure expected columns are present and ordered
@@ -2117,6 +2167,17 @@ df_raw.columns = [col.strip() for col in df_raw.columns]
 # Load persisted time blocks (if present) from storage metadata
 _sync_time_blocks_from_meta(df_raw)
 
+# Ensure expected columns exist (backfills older data/backends)
+for _col in _get_expected_columns():
+    if _col in df_raw.columns:
+        continue
+    if _col == "REMINDER_SNOOZE_UNTIL":
+        df_raw[_col] = pd.NA
+    elif _col == "REMINDER_DISMISSED":
+        df_raw[_col] = False
+    else:
+        df_raw[_col] = ""
+
 
 def _collect_unique_upper(df_any: pd.DataFrame, col_name: str) -> list[str]:
     try:
@@ -2137,6 +2198,10 @@ _extra_assistants: list[str] = []
 for _c in ["FIRST", "SECOND", "Third", "CASE PAPER"]:
     _extra_assistants.extend(_collect_unique_upper(df_raw, _c))
 ASSISTANT_OPTIONS = _unique_preserve_order(ALL_ASSISTANTS + _extra_assistants)
+
+# Status options: configured set + any existing values in data
+_extra_statuses = _collect_unique_upper(df_raw, "STATUS")
+STATUS_OPTIONS = _unique_preserve_order(STATUS_BASE_OPTIONS + _extra_statuses)
 
 
 # Process data
@@ -2566,7 +2631,7 @@ if "Is_Ongoing" not in df.columns:
 # Currently Ongoing (filtered)
 ongoing_df = df[
     df["Is_Ongoing"] &
-    ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE|SHIFTED", na=True)
+    ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE|COMPLETED|SHIFTED", na=True)
 ]
 
 current_ongoing = set(ongoing_df["Patient Name"].dropna())
@@ -2582,7 +2647,7 @@ upcoming_min = current_min + 15
 upcoming_df = df[
     (df["In_min"] > current_min) &
     (df["In_min"] <= upcoming_min) &
-    ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE|SHIFTED", na=True)
+    ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE|COMPLETED|SHIFTED", na=True)
 ]
 
 current_upcoming = set(upcoming_df["Patient Name"].dropna())
@@ -2607,7 +2672,7 @@ if st.session_state.get("enable_reminders", True):
         (df["In_min"].notna()) &
         (df["In_min"] - current_min > 0) &
         (df["In_min"] - current_min <= 15) &
-        ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE|SHIFTED|ARRIVED|ON GOING|ONGOING", na=True)
+        ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE|COMPLETED|SHIFTED|ARRIVED|ARRIVING|ON GOING|ONGOING", na=True)
     ].copy()
     
     # Show toast for new reminders (not snoozed, not dismissed)
@@ -2754,11 +2819,13 @@ def get_status_background(status):
     s = str(status).strip().upper()
     if "ON GOING" in s or "ONGOING" in s:
         return "border-left: 4px solid #10b981"
-    elif "DONE" in s:
+    elif "DONE" in s or "COMPLETED" in s:
         return "border-left: 4px solid #3b82f6"
     elif "CANCELLED" in s:
         return "border-left: 4px solid #ef4444"
     elif "ARRIVED" in s:
+        return "border-left: 4px solid #f59e0b"
+    elif "LATE" in s:
         return "border-left: 4px solid #f59e0b"
     elif "SHIFTED" in s:
         return "border-left: 4px solid #99582f"
@@ -3000,7 +3067,24 @@ with col_search:
             )
 
 all_sorted = df
-display_all = all_sorted[["Patient Name", "In Time Obj", "Out Time Obj", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CASE PAPER", "OP", "SUCTION", "CLEANING", "STATUS"]].copy()
+display_all = all_sorted[[
+    "Patient Name",
+    "In Time Obj",
+    "Out Time Obj",
+    "Procedure",
+    "DR.",
+    "FIRST",
+    "SECOND",
+    "Third",
+    "CASE PAPER",
+    "OP",
+    "SUCTION",
+    "CLEANING",
+    "STATUS",
+    "STATUS_CHANGED_AT",
+    "ACTUAL_START_AT",
+    "ACTUAL_END_AT",
+]].copy()
 display_all = display_all.rename(columns={"In Time Obj": "In Time", "Out Time Obj": "Out Time"})
 # Preserve original index for mapping edits back to df_raw
 display_all["_orig_idx"] = display_all.index
@@ -3015,11 +3099,28 @@ for col in ["Patient Name", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CAS
 display_all["In Time"] = display_all["In Time"].apply(lambda v: v if isinstance(v, time) else None)
 display_all["Out Time"] = display_all["Out Time"].apply(lambda v: v if isinstance(v, time) else None)
 
+# Computed overtime indicator (uses scheduled Out Time vs current time)
+def _compute_overtime_min(_row) -> int | None:
+    try:
+        s = str(_row.get("STATUS", "")).strip().upper()
+        if ("ON GOING" not in s) and ("ONGOING" not in s):
+            return None
+        out_min = _row.get("Out_min")
+        if pd.isna(out_min):
+            return None
+        diff = int(current_min) - int(out_min)
+        return diff if diff > 0 else None
+    except Exception:
+        return None
+
+display_all["Overtime (min)"] = all_sorted.apply(_compute_overtime_min, axis=1)
+
 edited_all = st.data_editor(
     display_all, 
     width="stretch", 
     key="full_schedule_editor", 
     hide_index=True,
+    disabled=["STATUS_CHANGED_AT", "ACTUAL_START_AT", "ACTUAL_END_AT", "Overtime (min)"],
     column_config={
         "_orig_idx": None,  # Hide the original index column
         "Patient Name": st.column_config.TextColumn(label="Patient Name"),
@@ -3058,9 +3159,13 @@ edited_all = st.data_editor(
         ),
         "SUCTION": st.column_config.CheckboxColumn(label="✨ SUCTION"),
         "CLEANING": st.column_config.CheckboxColumn(label="🧹 CLEANING"),
+        "STATUS_CHANGED_AT": st.column_config.TextColumn(label="Status Changed At"),
+        "ACTUAL_START_AT": st.column_config.TextColumn(label="Actual Start"),
+        "ACTUAL_END_AT": st.column_config.TextColumn(label="Actual End"),
+        "Overtime (min)": st.column_config.NumberColumn(label="Overtime (min)"),
         "STATUS": st.column_config.SelectboxColumn(
             label="STATUS",
-            options=["WAITING", "ARRIVED", "ON GOING", "CANCELLED", "SHIFTED", "DONE"],
+            options=STATUS_OPTIONS,
             required=False
         )
     }
@@ -3105,6 +3210,13 @@ if edited_all is not None:
                 
                 if orig_idx < len(df_updated):
                     try:
+                        old_status_norm = ""
+                        try:
+                            if "STATUS" in df_raw.columns:
+                                old_status_norm = str(df_raw.iloc[orig_idx, df_raw.columns.get_loc("STATUS")]).strip().upper()
+                        except Exception:
+                            old_status_norm = ""
+
                         # Handle Patient ID (optional)
                         if "Patient ID" in row.index and "Patient ID" in df_updated.columns:
                             pid = str(row.get("Patient ID", "")).strip()
@@ -3151,6 +3263,42 @@ if edited_all is not None:
                                 clean_val = str(val).strip() if val and str(val) != "nan" else ""
                                 df_updated.iloc[orig_idx, df_updated.columns.get_loc(col)] = clean_val
 
+                        # Time tracking: update timestamps + log on STATUS changes
+                        try:
+                            if "STATUS" in df_updated.columns:
+                                new_status_norm = str(df_updated.iloc[orig_idx, df_updated.columns.get_loc("STATUS")]).strip().upper()
+                                if new_status_norm and new_status_norm != old_status_norm:
+                                    ts = _now_ist_str()
+                                    if "STATUS_CHANGED_AT" in df_updated.columns:
+                                        df_updated.iloc[orig_idx, df_updated.columns.get_loc("STATUS_CHANGED_AT")] = ts
+
+                                    # Actual start/end stamps (only fill first time)
+                                    if ("ON GOING" in new_status_norm or "ONGOING" in new_status_norm) and "ACTUAL_START_AT" in df_updated.columns:
+                                        cur = str(df_updated.iloc[orig_idx, df_updated.columns.get_loc("ACTUAL_START_AT")]).strip()
+                                        if not cur or cur.lower() in {"nan", "none"}:
+                                            df_updated.iloc[orig_idx, df_updated.columns.get_loc("ACTUAL_START_AT")] = ts
+                                    if ("DONE" in new_status_norm or "COMPLETED" in new_status_norm) and "ACTUAL_END_AT" in df_updated.columns:
+                                        cur = str(df_updated.iloc[orig_idx, df_updated.columns.get_loc("ACTUAL_END_AT")]).strip()
+                                        if not cur or cur.lower() in {"nan", "none"}:
+                                            df_updated.iloc[orig_idx, df_updated.columns.get_loc("ACTUAL_END_AT")] = ts
+
+                                    if "STATUS_LOG" in df_updated.columns:
+                                        existing_log = ""
+                                        try:
+                                            existing_log = str(df_raw.iloc[orig_idx, df_raw.columns.get_loc("STATUS_LOG")]) if "STATUS_LOG" in df_raw.columns else ""
+                                        except Exception:
+                                            existing_log = ""
+                                        df_updated.iloc[orig_idx, df_updated.columns.get_loc("STATUS_LOG")] = _append_status_log(
+                                            existing_log,
+                                            {
+                                                "at": ts,
+                                                "from": old_status_norm,
+                                                "to": new_status_norm,
+                                            },
+                                        )
+                        except Exception:
+                            pass
+
                         # Candidate for allocation if doctor+times exist (helper will decide)
                         allocation_candidates.add(orig_idx)
                         
@@ -3192,9 +3340,27 @@ if unique_ops:
         with tab:
             op_df = df[
                 (df["OP"] == op)
-                & ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE", na=True)
+                & ~df["STATUS"].astype(str).str.upper().str.contains("CANCELLED|DONE|COMPLETED", na=True)
             ]
-            display_op = op_df[["Patient ID", "Patient Name", "In Time Obj", "Out Time Obj", "Procedure", "DR.", "OP", "FIRST", "SECOND", "Third", "CASE PAPER", "SUCTION", "CLEANING", "STATUS"]].copy()
+            display_op = op_df[[
+                "Patient ID",
+                "Patient Name",
+                "In Time Obj",
+                "Out Time Obj",
+                "Procedure",
+                "DR.",
+                "OP",
+                "FIRST",
+                "SECOND",
+                "Third",
+                "CASE PAPER",
+                "SUCTION",
+                "CLEANING",
+                "STATUS",
+                "STATUS_CHANGED_AT",
+                "ACTUAL_START_AT",
+                "ACTUAL_END_AT",
+            ]].copy()
             display_op = display_op.rename(columns={"In Time Obj": "In Time", "Out Time Obj": "Out Time"})
             # Preserve original index for mapping edits back to df_raw
             display_op["_orig_idx"] = display_op.index
@@ -3202,12 +3368,15 @@ if unique_ops:
             # Ensure time objects are preserved; Streamlit TimeColumn edits best with None for missing
             display_op["In Time"] = display_op["In Time"].apply(lambda v: v if isinstance(v, time) else None)
             display_op["Out Time"] = display_op["Out Time"].apply(lambda v: v if isinstance(v, time) else None)
+
+            display_op["Overtime (min)"] = op_df.apply(_compute_overtime_min, axis=1)
             
             edited_op = st.data_editor(
                 display_op, 
                 width="stretch", 
                 key=f"op_{str(op).replace(' ', '_')}_editor", 
                 hide_index=True,
+                disabled=["STATUS_CHANGED_AT", "ACTUAL_START_AT", "ACTUAL_END_AT", "Overtime (min)"],
                 column_config={
                     "_orig_idx": None,
                     "Patient ID": st.column_config.TextColumn(label="Patient ID", required=False),
@@ -3243,9 +3412,13 @@ if unique_ops:
                         options=ASSISTANT_OPTIONS,
                         required=False
                     ),
+                    "STATUS_CHANGED_AT": st.column_config.TextColumn(label="Status Changed At"),
+                    "ACTUAL_START_AT": st.column_config.TextColumn(label="Actual Start"),
+                    "ACTUAL_END_AT": st.column_config.TextColumn(label="Actual End"),
+                    "Overtime (min)": st.column_config.NumberColumn(label="Overtime (min)"),
                     "STATUS": st.column_config.SelectboxColumn(
                         label="STATUS",
-                        options=["WAITING", "ARRIVED", "ON GOING", "CANCELLED", "SHIFTED", "DONE"],
+                        options=STATUS_OPTIONS,
                         required=False
                     )
                 }
@@ -3281,6 +3454,13 @@ if unique_ops:
                             if orig_idx < 0 or orig_idx >= len(df_updated):
                                 continue
 
+                            old_status_norm = ""
+                            try:
+                                if "STATUS" in df_raw.columns:
+                                    old_status_norm = str(df_raw.iloc[orig_idx, df_raw.columns.get_loc("STATUS")]).strip().upper()
+                            except Exception:
+                                old_status_norm = ""
+
                             # Patient ID
                             patient_id = str(row.get("Patient ID", "")).strip()
                             if "Patient ID" in df_updated.columns:
@@ -3312,6 +3492,37 @@ if unique_ops:
                                     val = row.get(c)
                                     clean_val = str(val).strip() if val and str(val) != "nan" else ""
                                     df_updated.iloc[orig_idx, df_updated.columns.get_loc(c)] = clean_val
+
+                            # Time tracking: update timestamps + log on STATUS changes
+                            try:
+                                if "STATUS" in df_updated.columns:
+                                    new_status_norm = str(df_updated.iloc[orig_idx, df_updated.columns.get_loc("STATUS")]).strip().upper()
+                                    if new_status_norm and new_status_norm != old_status_norm:
+                                        ts = _now_ist_str()
+                                        if "STATUS_CHANGED_AT" in df_updated.columns:
+                                            df_updated.iloc[orig_idx, df_updated.columns.get_loc("STATUS_CHANGED_AT")] = ts
+
+                                        if ("ON GOING" in new_status_norm or "ONGOING" in new_status_norm) and "ACTUAL_START_AT" in df_updated.columns:
+                                            cur = str(df_updated.iloc[orig_idx, df_updated.columns.get_loc("ACTUAL_START_AT")]).strip()
+                                            if not cur or cur.lower() in {"nan", "none"}:
+                                                df_updated.iloc[orig_idx, df_updated.columns.get_loc("ACTUAL_START_AT")] = ts
+                                        if ("DONE" in new_status_norm or "COMPLETED" in new_status_norm) and "ACTUAL_END_AT" in df_updated.columns:
+                                            cur = str(df_updated.iloc[orig_idx, df_updated.columns.get_loc("ACTUAL_END_AT")]).strip()
+                                            if not cur or cur.lower() in {"nan", "none"}:
+                                                df_updated.iloc[orig_idx, df_updated.columns.get_loc("ACTUAL_END_AT")] = ts
+
+                                        if "STATUS_LOG" in df_updated.columns:
+                                            existing_log = ""
+                                            try:
+                                                existing_log = str(df_raw.iloc[orig_idx, df_raw.columns.get_loc("STATUS_LOG")]) if "STATUS_LOG" in df_raw.columns else ""
+                                            except Exception:
+                                                existing_log = ""
+                                            df_updated.iloc[orig_idx, df_updated.columns.get_loc("STATUS_LOG")] = _append_status_log(
+                                                existing_log,
+                                                {"at": ts, "from": old_status_norm, "to": new_status_norm},
+                                            )
+                            except Exception:
+                                pass
 
                             allocation_candidates.add(orig_idx)
 
