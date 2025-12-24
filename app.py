@@ -596,15 +596,21 @@ st.markdown(
        - Keeps keyboard accessibility via :focus-visible
        NOTE: This targets BaseWeb checkbox markup and does NOT touch the data editor's native inputs.
     */
-    div[data-baseweb="checkbox"] svg path,
+    /* BaseWeb checkbox SVG typically contains multiple paths (box + tick).
+       Target the tick specifically (usually the 2nd path) + any polyline tick.
+    */
+    div[data-baseweb="checkbox"] svg path:nth-of-type(2),
     div[data-baseweb="checkbox"] svg polyline {{
-        stroke-dasharray: 24;
-        stroke-dashoffset: 24;
+        fill: none !important;
+        stroke: var(--text-secondary) !important;
+        /* Large dash length so the tick fully hides/shows regardless of path length */
+        stroke-dasharray: 1000;
+        stroke-dashoffset: 1000;
         transition: stroke-dashoffset 220ms ease;
     }}
 
     /* Draw the tick when checked */
-    div[data-baseweb="checkbox"]:has(input[type="checkbox"]:checked) svg path,
+    div[data-baseweb="checkbox"]:has(input[type="checkbox"]:checked) svg path:nth-of-type(2),
     div[data-baseweb="checkbox"]:has(input[type="checkbox"]:checked) svg polyline {{
         stroke-dashoffset: 0;
     }}
@@ -636,7 +642,7 @@ st.markdown(
         [data-testid="stDataFrameContainer"] input[type="checkbox"]:checked {{
             animation: none !important;
         }}
-        div[data-baseweb="checkbox"] svg path,
+        div[data-baseweb="checkbox"] svg path:nth-of-type(2),
         div[data-baseweb="checkbox"] svg polyline {{
             transition: none;
         }}
