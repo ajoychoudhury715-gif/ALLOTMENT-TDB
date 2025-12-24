@@ -11,6 +11,12 @@ import uuid  # for generating stable row IDs
 import json
 import io
 
+try:
+    import altair as alt  # type: ignore
+    ALTAIR_AVAILABLE = True
+except Exception:
+    ALTAIR_AVAILABLE = False
+
 # Supabase integration (Postgres) for persistent cloud storage (no Google)
 try:
     from supabase import create_client  # type: ignore
@@ -44,20 +50,49 @@ except Exception:
 st.set_page_config(page_title="ALLOTMENT", layout="wide", initial_sidebar_state="collapsed")
 
 # ===== COLOR CUSTOMIZATION SECTION =====
-# Easily modify these colors to change the entire theme
-COLORS = {
-    "bg_primary": "#ffffff",      # Main background (white)
-    "bg_secondary": "#f5f5f5",    # Secondary background (light gray)
-    "text_primary": "#111b26",    # Main text (dark)
-    "text_secondary": "#99582f",  # Secondary text (brown)
-    "button_bg": "#99582f",       # Button background (brown)
-    "button_text": "#f9f9f9",     # Button text (light)
-    "accent": "#c9bbb0",          # Accent color (beige)
-    "success": "#10b981",         # Green for success
-    "warning": "#f59e0b",         # Amber for warnings
-    "danger": "#ef4444",          # Red for danger
-    "info": "#3b82f6",            # Blue for info
+# Keep all colors centralized so UI stays consistent.
+LIGHT_COLORS = {
+    "bg_primary": "#ffffff",
+    "bg_secondary": "#f5f5f5",
+    "text_primary": "#111b26",
+    "text_secondary": "#99582f",
+    "button_bg": "#99582f",
+    "button_text": "#f9f9f9",
+    "accent": "#c9bbb0",
+    "success": "#10b981",
+    "warning": "#f59e0b",
+    "danger": "#ef4444",
+    "info": "#3b82f6",
+    # Glass surfaces
+    "glass_bg": "rgba(255, 255, 255, 0.75)",
+    "glass_border": "rgba(201, 187, 176, 0.65)",
 }
+
+# Dark mode with vibrant neon accents for status indicators
+DARK_COLORS = {
+    "bg_primary": "#0b0f14",
+    "bg_secondary": "#111827",
+    "text_primary": "#e5e7eb",
+    "text_secondary": "#93c5fd",
+    "button_bg": "#60a5fa",
+    "button_text": "#0b0f14",
+    "accent": "#1f2937",
+    "success": "#00ff9c",
+    "warning": "#ffb000",
+    "danger": "#ff3b7a",
+    "info": "#00d1ff",
+    # Glass surfaces
+    "glass_bg": "rgba(17, 24, 39, 0.62)",
+    "glass_border": "rgba(255, 255, 255, 0.10)",
+}
+
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode = False
+
+with st.sidebar:
+    st.toggle("🌙 Dark mode", key="dark_mode")
+
+COLORS = DARK_COLORS if bool(st.session_state.get("dark_mode")) else LIGHT_COLORS
 
 # Custom CSS with customizable colors
 st.markdown(
@@ -69,6 +104,12 @@ st.markdown(
         --text-primary: {COLORS['text_primary']};
         --text-secondary: {COLORS['text_secondary']};
         --accent: {COLORS['accent']};
+        --success: {COLORS['success']};
+        --warning: {COLORS['warning']};
+        --danger: {COLORS['danger']};
+        --info: {COLORS['info']};
+        --glass-bg: {COLORS['glass_bg']};
+        --glass-border: {COLORS['glass_border']};
     }}
     
     * {{
@@ -77,9 +118,12 @@ st.markdown(
     }}
     
     body, .stApp {{
-        background: linear-gradient(135deg, #ffffff 0%, #f9f8f6 100%) !important;
-        color: {COLORS['text_primary']} !important;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+                background:
+                    radial-gradient(1200px circle at 18% 8%, rgba(0, 209, 255, 0.10), transparent 42%),
+                    radial-gradient(900px circle at 82% 18%, rgba(0, 255, 156, 0.10), transparent 45%),
+                    linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%) !important;
+                color: var(--text-primary) !important;
+                font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
     }}
     
     header {{
@@ -106,6 +150,8 @@ st.markdown(
     /* Professional main container */
     .main {{
         padding: 2rem 3rem !important;
+        max-width: 2200px !important;
+        margin: 0 auto !important;
     }}
     
     /* Professional header styling */
@@ -194,20 +240,20 @@ st.markdown(
     
     /* Table Header Styling - Premium & Elegant */
     [data-testid="stDataFrameContainer"] thead {{
-        background: linear-gradient(135deg, #99582f 0%, #99582f 100%) !important;
-        border-bottom: 4px solid #f9f9f9 !important;
-        box-shadow: 0 6px 18px rgba(153, 88, 47, 0.18) !important;
+        background: linear-gradient(135deg, {COLORS['button_bg']} 0%, {COLORS['button_bg']} 100%) !important;
+        border-bottom: 1px solid var(--glass-border) !important;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28) !important;
     }}
     
     [data-testid="stDataFrameContainer"] thead th {{
-        color: #f9f9f9 !important;
+        color: {COLORS['button_text']} !important;
         font-weight: 800 !important;
         padding: 18px 16px !important;
         text-align: center !important;
         font-size: 0.99rem !important;
         letter-spacing: 1px !important;
         text-transform: uppercase !important;
-        background: linear-gradient(135deg, #99582f 0%, #99582f 100%) !important;
+        background: linear-gradient(135deg, {COLORS['button_bg']} 0%, {COLORS['button_bg']} 100%) !important;
         position: relative !important;
         text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3) !important;
         box-shadow: inset 0 1px 0 rgba(249, 249, 249, 0.18) !important;
@@ -222,7 +268,7 @@ st.markdown(
     [data-testid="stDataFrameContainer"] thead th:hover {{
         filter: brightness(1.08) !important;
         transform: translateY(-2px) !important;
-        box-shadow: inset 0 1px 0 rgba(249, 249, 249, 0.28), 0 10px 22px rgba(153, 88, 47, 0.20) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 10px 22px rgba(0, 0, 0, 0.22) !important;
     }}
     
     /* Premium Table Rows */
@@ -234,12 +280,12 @@ st.markdown(
     
     /* Alternating row background for better readability */
     [data-testid="stDataFrameContainer"] tbody tr:nth-child(even) {{
-        background-color: rgba(201, 187, 176, 0.08) !important;
+        background-color: rgba(255, 255, 255, 0.04) !important;
     }}
     
     [data-testid="stDataFrameContainer"] tbody tr:hover {{
-        background-color: rgba(201, 187, 176, 0.14) !important;
-        box-shadow: 0 2px 10px rgba(153, 88, 47, 0.10) inset !important;
+        background-color: rgba(255, 255, 255, 0.06) !important;
+        box-shadow: 0 2px 14px rgba(0, 0, 0, 0.22) inset !important;
     }}
     
     /* Premium Table Cells */
@@ -273,8 +319,8 @@ st.markdown(
     }}
     
     [data-baseweb="select"] button:hover {{
-        border-color: #99582f !important;
-        box-shadow: 0 2px 4px rgba(153, 88, 47, 0.15) !important;
+        border-color: {COLORS['button_bg']} !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22) !important;
     }}
     
     [data-baseweb="select"] button span {{
@@ -299,8 +345,8 @@ st.markdown(
     }}
     
     [data-baseweb="menu"] li:hover {{
-        background-color: #99582f !important;
-        color: #f5f5f5 !important;
+        background-color: {COLORS['button_bg']} !important;
+        color: {COLORS['button_text']} !important;
     }}
     
     [role="option"] {{
@@ -310,14 +356,16 @@ st.markdown(
     }}
     
     [role="option"]:hover {{
-        background-color: #99582f !important;
-        color: #f5f5f5 !important;
+        background-color: {COLORS['button_bg']} !important;
+        color: {COLORS['button_text']} !important;
     }}
     
     [role="listbox"] {{
-        background-color: {COLORS['bg_secondary']} !important;
-        border-radius: 8px !important;
-        border: 1px solid #d3c3b0 !important;
+        background: var(--glass-bg) !important;
+        border-radius: 10px !important;
+        border: 1px solid var(--glass-border) !important;
+        backdrop-filter: blur(14px) saturate(140%) !important;
+        -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
     }}
     
     /* Data editor dropdown text visibility */
@@ -331,8 +379,8 @@ st.markdown(
     }}
     
     div[data-testid="stDataFrameContainer"] [role="option"]:hover {{
-        background-color: #99582f !important;
-        color: #f5f5f5 !important;
+        background-color: {COLORS['button_bg']} !important;
+        color: {COLORS['button_text']} !important;
     }}
     
     /* Button Styling - Premium & Attractive */
@@ -345,7 +393,7 @@ st.markdown(
         font-size: 1rem !important;
         padding: 12px 28px !important;
         transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        box-shadow: 0 4px 15px rgba(153, 88, 47, 0.25) !important;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25) !important;
         letter-spacing: 0.5px !important;
         text-transform: uppercase !important;
         cursor: pointer !important;
@@ -354,46 +402,46 @@ st.markdown(
     .stButton>button:hover {{
         background: linear-gradient(135deg, {COLORS['text_primary']} 0%, {COLORS['button_bg']} 100%) !important;
         transform: translateY(-4px) !important;
-        box-shadow: 0 8px 25px rgba(153, 88, 47, 0.4) !important;
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32) !important;
         letter-spacing: 1px !important;
     }}
     
     .stButton>button:active {{
         transform: translateY(-1px) !important;
-        box-shadow: 0 2px 8px rgba(153, 88, 47, 0.3) !important;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28) !important;
     }}
     
     .stButton>button:focus {{
         outline: none !important;
-        box-shadow: 0 0 0 3px rgba(153, 88, 47, 0.2) !important;
+        box-shadow: 0 0 0 3px {COLORS['button_bg']} !important;
     }}
 
     /* Targeted hover animation: Add Patient + Save only (via unique tooltip/title) */
     button[title="Add a new patient row (uses selected patient if chosen)"] {{
         position: relative !important;
         overflow: hidden !important;
-        background: #99582f !important;
-        color: #f9f9f9 !important;
+        background: {COLORS['button_bg']} !important;
+        color: {COLORS['button_text']} !important;
     }}
 
     button[title="Save changes to storage"] {{
         position: relative !important;
         overflow: hidden !important;
-        background: #99582f !important;
-        color: #f9f9f9 !important;
+        background: {COLORS['button_bg']} !important;
+        color: {COLORS['button_text']} !important;
     }}
 
     button[title="Add a new patient row (uses selected patient if chosen)"]:hover,
     button[title="Save changes to storage"]:hover {{
-        background: #111b26 !important;
-        color: #f9f9f9 !important;
+        background: {COLORS['text_primary']} !important;
+        color: {COLORS['button_text']} !important;
         animation: pulse-glow 1.4s ease-out infinite !important;
     }}
 
     button[title="Add a new patient row (uses selected patient if chosen)"]:active,
     button[title="Save changes to storage"]:active {{
-        background: #111b26 !important;
-        color: #f9f9f9 !important;
+        background: {COLORS['text_primary']} !important;
+        color: {COLORS['button_text']} !important;
     }}
     
     .st-bv, .st-cv, .st-cw {{
@@ -422,22 +470,24 @@ st.markdown(
     
     /* Data Frame Container - Premium & Beautiful */
     [data-testid="stDataFrameContainer"] {{
-        background-color: {COLORS['bg_secondary']} !important;
-        border-radius: 12px !important;
-        border: 1px solid rgba(201, 187, 176, 0.65) !important;
-        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
+        background: var(--glass-bg) !important;
+        border-radius: 14px !important;
+        border: 1px solid var(--glass-border) !important;
+        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.30) !important;
         overflow: hidden !important;
         transition: all 0.3s ease !important;
+        backdrop-filter: blur(14px) saturate(140%) !important;
+        -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
     }}
     
     [data-testid="stDataFrameContainer"]:hover {{
-        box-shadow: 0 10px 26px rgba(0, 0, 0, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
+        box-shadow: 0 18px 52px rgba(0, 0, 0, 0.36) !important;
     }}
     
     /* Tabs Styling */
     .stTabs [data-baseweb="tab-list"] {{
         background-color: transparent !important;
-        border-bottom: 2px solid #d3c3b0 !important;
+        border-bottom: 1px solid var(--glass-border) !important;
     }}
     
     .stTabs [data-baseweb="tab"] {{
@@ -448,7 +498,7 @@ st.markdown(
     }}
     
     .stTabs [data-baseweb="tab"]:hover {{
-        color: #99582f !important;
+        color: {COLORS['button_bg']} !important;
     }}
     
     .stTabs [aria-selected="true"] {{
@@ -2924,22 +2974,87 @@ def get_status_background(status):
     # Return subtle styling without bright backgrounds
     s = str(status).strip().upper()
     if "ON GOING" in s or "ONGOING" in s:
-        return "border-left: 4px solid #10b981"
+        return f"border-left: 4px solid {COLORS['success']}"
     elif "DONE" in s or "COMPLETED" in s:
-        return "border-left: 4px solid #3b82f6"
+        return f"border-left: 4px solid {COLORS['info']}"
     elif "CANCELLED" in s:
-        return "border-left: 4px solid #ef4444"
+        return f"border-left: 4px solid {COLORS['danger']}"
     elif "ARRIVED" in s:
-        return "border-left: 4px solid #f59e0b"
+        return f"border-left: 4px solid {COLORS['warning']}"
     elif "LATE" in s:
-        return "border-left: 4px solid #f59e0b"
+        return f"border-left: 4px solid {COLORS['warning']}"
     elif "SHIFTED" in s:
-        return "border-left: 4px solid #99582f"
+        return f"border-left: 4px solid {COLORS['button_bg']}"
     return ""
 
 def highlight_row(row):
     color = get_status_background(row["STATUS"])
     return [color for _ in row]
+
+# ================ Dashboard (Admin Panel) ================
+st.markdown("### 📊 Dashboard")
+
+try:
+    status_norm = df_raw.get("STATUS", pd.Series([], dtype=str)).astype(str).str.strip().str.upper()
+    status_norm = status_norm.replace({"": "UNKNOWN", "NAN": "UNKNOWN", "NONE": "UNKNOWN"})
+    total_patients = int(len(df_raw))
+    waiting_cnt = int((status_norm == "WAITING").sum())
+    arrived_cnt = int((status_norm == "ARRIVED").sum())
+    ongoing_cnt = int(status_norm.str.contains("ON GOING|ONGOING", na=False).sum())
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total", total_patients)
+    m2.metric("Waiting", waiting_cnt)
+    m3.metric("Arrived", arrived_cnt)
+    m4.metric("On Going", ongoing_cnt)
+
+    counts = status_norm.value_counts(dropna=False).reset_index()
+    counts.columns = ["status", "count"]
+
+    if ALTAIR_AVAILABLE and not counts.empty:
+        status_color_map = {
+            "WAITING": COLORS["info"],
+            "PENDING": COLORS["info"],
+            "ARRIVING": COLORS["warning"],
+            "ARRIVED": COLORS["warning"],
+            "ON GOING": COLORS["success"],
+            "ONGOING": COLORS["success"],
+            "DONE": COLORS["info"],
+            "COMPLETED": COLORS["info"],
+            "CANCELLED": COLORS["danger"],
+            "SHIFTED": COLORS["button_bg"],
+            "LATE": COLORS["warning"],
+            "UNKNOWN": COLORS["accent"],
+        }
+        # Provide stable color domain/range for known statuses; unknowns fall back to accent.
+        known_statuses = [s for s in counts["status"].tolist() if s in status_color_map]
+        domain = known_statuses
+        rng = [status_color_map[s] for s in domain]
+
+        chart = (
+            alt.Chart(counts)
+            .mark_bar(cornerRadiusTopRight=6, cornerRadiusBottomRight=6)
+            .encode(
+                x=alt.X("count:Q", title="Patients"),
+                y=alt.Y("status:N", sort="-x", title="Status"),
+                color=alt.Color(
+                    "status:N",
+                    legend=None,
+                    scale=alt.Scale(domain=domain, range=rng),
+                ),
+                tooltip=[
+                    alt.Tooltip("status:N", title="Status"),
+                    alt.Tooltip("count:Q", title="Count"),
+                ],
+            )
+            .properties(height=240)
+        )
+        st.altair_chart(chart, use_container_width=True)
+    else:
+        # Fallback basic chart (non-interactive)
+        st.bar_chart(counts.set_index("status")["count"])
+except Exception:
+    pass
 
 # ================ Full Schedule ================
 st.markdown("### 📅 Full Today's Schedule")
