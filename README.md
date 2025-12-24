@@ -20,14 +20,12 @@ A **Streamlit-based real-time scheduling dashboard** for managing dental allotme
 
 ☁️ **Cloud-Ready**
 - **Supabase (Postgres) integration** for persistent cloud storage (recommended)
-- Optional **Google Sheets integration** (fallback)
 - Works on Streamlit Cloud without data loss
 - Falls back to local Excel file for development
 - Real-time sync across all users
 
 📊 **Data Management**
 - Excel integration (local development)
-- Google Sheets integration (production)
 - Live data editing
 - Automatic save functionality
 - Change detection with notifications
@@ -38,14 +36,13 @@ A **Streamlit-based real-time scheduling dashboard** for managing dental allotme
 - Manual override supported (auto-allocation can be configured to fill only empty slots)
 - **Time blocks** for assistants (backend work, lunch, training) are persisted:
    - **Supabase**: stored in the same `payload.meta` JSON as the schedule
-   - **Google Sheets**: stored in a separate worksheet named `Meta`
    - **Excel**: stored in a separate sheet named `Meta`
 
 ## Deployment Options
 
 ### Option 1: Streamlit Cloud (Recommended for Production)
 
-#### Option 1A (Recommended): Supabase (No Google Sheets)
+#### Supabase (Recommended)
 
 1. **Create a Supabase project**
    - Go to https://supabase.com and create a new project
@@ -122,43 +119,6 @@ Secrets (only needed if you used different names):
 # supabase_patients_id_col = "id"
 # supabase_patients_name_col = "name"
 ```
-
-#### Option 1B: Google Sheets (Alternative)
-
-1. **Create a Google Sheet**
-   - Go to [Google Sheets](https://sheets.google.com) and create a new spreadsheet
-   - Add these column headers in row 1:
-     `Patient Name, In Time, Out Time, Procedure, DR., FIRST, SECOND, Third, CASE PAPER, OP, SUCTION, CLEANING, STATUS`
-   - Copy the spreadsheet URL
-
-2. **Set up Google Cloud Service Account**
-   - Go to [Google Cloud Console](https://console.cloud.google.com)
-   - Create a new project or select an existing one
-   - Enable **Google Sheets API** and **Google Drive API**
-   - Go to *APIs & Services > Credentials > Create Credentials > Service Account*
-   - Create a key for the service account (JSON format)
-   - **Important**: Share your Google Sheet with the service account email (with Editor access)
-
-3. **Deploy to Streamlit Cloud**
-   - Go to [share.streamlit.io](https://share.streamlit.io) and sign in
-   - Click "New app" and select this repository
-   - In app settings, go to **Secrets** and add:
-   ```toml
-   spreadsheet_url = "https://docs.google.com/spreadsheets/d/YOUR_SPREADSHEET_ID/edit"
-   
-   [gcp_service_account]
-   type = "service_account"
-   project_id = "your-project-id"
-   private_key_id = "your-private-key-id"
-   private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-   client_email = "your-service-account@your-project-id.iam.gserviceaccount.com"
-   client_id = "your-client-id"
-   auth_uri = "https://accounts.google.com/o/oauth2/auth"
-   token_uri = "https://oauth2.googleapis.com/token"
-   auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
-   client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/..."
-   ```
-   - Click Deploy!
 
 ### Option 2: Local Development
 

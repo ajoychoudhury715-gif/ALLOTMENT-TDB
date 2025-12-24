@@ -12,10 +12,12 @@ import json
 import io
 
 try:
-    import altair as alt  # type: ignore
-    ALTAIR_AVAILABLE = True
+    # Altair was previously used for a status dashboard chart.
+    # Kept as a try-block placeholder to avoid breaking older deployments that
+    # may still have altair installed, but the app no longer requires it.
+    pass
 except Exception:
-    ALTAIR_AVAILABLE = False
+    pass
 
 # Supabase integration (Postgres) for persistent cloud storage (no Google)
 try:
@@ -555,31 +557,24 @@ st.markdown(
     }}
     
     /* Checkbox Styling */
-    input[type="checkbox"] {{
-        cursor: pointer !important;
-        transition: all 0.3s ease !important;
-        width: 18px !important;
-        height: 18px !important;
-        accent-color: #99582f !important;
-    }}
-    
-    input[type="checkbox"]:hover {{
-        filter: brightness(1.15) !important;
-    }}
-    
-    input[type="checkbox"]:active {{
-        animation: bounce-click 0.4s ease !important;
-    }}
-    
-    input[type="checkbox"]:checked {{
-        animation: spin-check 0.5s ease !important;
-    }}
-    
-    /* Style checkbox containers */
+    /* IMPORTANT: Scope checkbox styling to the data editor only.
+       Streamlit sidebar widgets use BaseWeb components that also rely on
+       checkbox inputs; global overrides can make them appear "frozen".
+    */
     [data-testid="stDataFrameContainer"] input[type="checkbox"] {{
         width: 20px !important;
         height: 20px !important;
         cursor: pointer !important;
+        transition: all 0.3s ease !important;
+        accent-color: #99582f !important;
+    }}
+
+    [data-testid="stDataFrameContainer"] input[type="checkbox"]:active {{
+        animation: bounce-click 0.4s ease !important;
+    }}
+
+    [data-testid="stDataFrameContainer"] input[type="checkbox"]:checked {{
+        animation: spin-check 0.5s ease !important;
     }}
     
     /* Divider styling */
@@ -630,7 +625,9 @@ st.markdown(
 col_logo, col_title, col_space = st.columns([0.3, 2, 0.3])
 
 with col_logo:
-    st.image("The Dental Bond LOGO_page-0001.jpg", width=140)
+    _logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "The Dental Bond LOGO_page-0001.jpg")
+    if os.path.exists(_logo_path):
+        st.image(_logo_path, width=140)
 
 with col_title:
     st.markdown("""
@@ -706,6 +703,26 @@ def _unique_preserve_order(items: list[str]) -> list[str]:
     return out
 
 
+def _norm_staff_key(value: str) -> str:
+    """Normalize names like 'DR. HUSSAIN' vs 'DR.HUSSAIN' to a stable key."""
+    try:
+        s = str(value or "").strip().upper()
+        return re.sub(r"[^A-Z0-9]+", "", s)
+    except Exception:
+        return ""
+
+
+def _is_blank_cell(value) -> bool:
+    """True if value is empty/NaN/'nan'/'none'."""
+    try:
+        if value is None or pd.isna(value):
+            return True
+    except Exception:
+        pass
+    s = str(value).strip()
+    return (not s) or (s.lower() in {"nan", "none", "nat"})
+
+
 DEPARTMENTS = {
     "PROSTO": {
         "doctors": _unique_preserve_order([
@@ -751,10 +768,16 @@ def get_department_for_doctor(doctor_name: str) -> str:
     """Get the department a doctor belongs to"""
     if not doctor_name:
         return ""
-    doc_upper = str(doctor_name).strip().upper()
+    doc_key = _norm_staff_key(doctor_name)
+    if not doc_key:
+        return ""
     for dept, config in DEPARTMENTS.items():
-        if any(doc_upper == d.upper() or doc_upper in d.upper() for d in config["doctors"]):
-            return dept
+        for d in config["doctors"]:
+            d_key = _norm_staff_key(d)
+            if not d_key:
+                continue
+            if doc_key == d_key or doc_key.endswith(d_key) or d_key.endswith(doc_key):
+                return dept
     return ""
 
 def get_assistants_for_department(department: str) -> list:
@@ -768,10 +791,16 @@ def get_department_for_assistant(assistant_name: str) -> str:
     """Get the department an assistant belongs to"""
     if not assistant_name:
         return ""
-    assist_upper = str(assistant_name).strip().upper()
+    assist_key = _norm_staff_key(assistant_name)
+    if not assist_key:
+        return ""
     for dept, config in DEPARTMENTS.items():
-        if any(assist_upper == a.upper() or assist_upper in a.upper() for a in config["assistants"]):
-            return dept
+        for a in config["assistants"]:
+            a_key = _norm_staff_key(a)
+            if not a_key:
+                continue
+            if assist_key == a_key or assist_key.endswith(a_key) or a_key.endswith(assist_key):
+                return dept
     # ANSHIKA is shared between departments
     return "SHARED"
 
@@ -1101,10 +1130,11 @@ def _auto_fill_assistants_for_row(df_schedule: pd.DataFrame, row_index: int, onl
         if row_index < 0 or row_index >= len(df_schedule):
             return False
 
-        doctor = str(df_schedule.at[row_index, "DR."] if "DR." in df_schedule.columns else "").strip()
-        in_time_val = df_schedule.at[row_index, "In Time"] if "In Time" in df_schedule.columns else None
-        out_time_val = df_schedule.at[row_index, "Out Time"] if "Out Time" in df_schedule.columns else None
-        row_id = str(df_schedule.at[row_index, "REMINDER_ROW_ID"] if "REMINDER_ROW_ID" in df_schedule.columns else "").strip()
+        row = df_schedule.iloc[row_index]
+        doctor = str(row.get("DR.", "")).strip()
+        in_time_val = row.get("In Time", None)
+        out_time_val = row.get("Out Time", None)
+        row_id = str(row.get("REMINDER_ROW_ID", "")).strip()
 
         if not doctor:
             return False
@@ -1115,14 +1145,19 @@ def _auto_fill_assistants_for_row(df_schedule: pd.DataFrame, row_index: int, onl
         if not department:
             return False
 
-        current_first = str(df_schedule.at[row_index, "FIRST"] if "FIRST" in df_schedule.columns else "").strip()
-        current_second = str(df_schedule.at[row_index, "SECOND"] if "SECOND" in df_schedule.columns else "").strip()
-        current_third = str(df_schedule.at[row_index, "Third"] if "Third" in df_schedule.columns else "").strip()
+        current_first = row.get("FIRST", "")
+        current_second = row.get("SECOND", "")
+        current_third = row.get("Third", "")
 
-        if only_fill_empty and (current_first and current_second and current_third):
+        # If all 3 are truly filled, nothing to do.
+        if only_fill_empty and (not _is_blank_cell(current_first)) and (not _is_blank_cell(current_second)) and (not _is_blank_cell(current_third)):
             return False
 
-        already = {x.strip().upper() for x in [current_first, current_second, current_third] if x and x.lower() not in {"nan", "none"}}
+        already = {
+            str(x).strip().upper()
+            for x in [current_first, current_second, current_third]
+            if not _is_blank_cell(x)
+        }
 
         # Compute free assistants for this time window, excluding this same row.
         avail = get_available_assistants(department, in_time_val, out_time_val, df_schedule, exclude_row_id=row_id)
@@ -1133,11 +1168,12 @@ def _auto_fill_assistants_for_row(df_schedule: pd.DataFrame, row_index: int, onl
         roles = [("FIRST", current_first), ("SECOND", current_second), ("Third", current_third)]
         pick_i = 0
         for role, current_val in roles:
-            if only_fill_empty and current_val and str(current_val).strip() and str(current_val).strip().lower() not in {"nan", "none"}:
+            if only_fill_empty and (not _is_blank_cell(current_val)):
                 continue
             if pick_i >= len(free):
                 break
-            df_schedule.at[row_index, role] = free[pick_i]
+            if role in df_schedule.columns:
+                df_schedule.iloc[row_index, df_schedule.columns.get_loc(role)] = free[pick_i]
             already.add(str(free[pick_i]).strip().upper())
             pick_i += 1
             changed = True
@@ -1253,6 +1289,33 @@ supabase_row_id = "main"
 
 gsheet_client = None
 gsheet_worksheet = None
+
+
+def _safe_secret_get(key: str, default=None):
+    """Safely read st.secrets in all environments."""
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
+
+# Auto-select backend for Streamlit Cloud:
+# Prefer Supabase when configured, else Google Sheets, else local Excel.
+if (not USE_SUPABASE) and (not USE_GOOGLE_SHEETS):
+    sup_url_hint = _safe_secret_get("supabase_url") or os.environ.get("SUPABASE_URL")
+    sup_key_hint = (
+        _safe_secret_get("supabase_service_role_key")
+        or _safe_secret_get("supabase_key")
+        or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("SUPABASE_KEY")
+    )
+    if SUPABASE_AVAILABLE and sup_url_hint and sup_key_hint:
+        USE_SUPABASE = True
+    else:
+        gsheet_url_hint = _safe_secret_get("spreadsheet_url") or os.environ.get("SPREADSHEET_URL")
+        gcp_sa_hint = _safe_secret_get("gcp_service_account")
+        if GSHEETS_AVAILABLE and gsheet_url_hint and gcp_sa_hint:
+            USE_GOOGLE_SHEETS = True
 
 
 def _normalize_service_account_info(raw_info: dict) -> dict:
@@ -2990,71 +3053,6 @@ def get_status_background(status):
 def highlight_row(row):
     color = get_status_background(row["STATUS"])
     return [color for _ in row]
-
-# ================ Dashboard (Admin Panel) ================
-st.markdown("### 📊 Dashboard")
-
-try:
-    status_norm = df_raw.get("STATUS", pd.Series([], dtype=str)).astype(str).str.strip().str.upper()
-    status_norm = status_norm.replace({"": "UNKNOWN", "NAN": "UNKNOWN", "NONE": "UNKNOWN"})
-    total_patients = int(len(df_raw))
-    waiting_cnt = int((status_norm == "WAITING").sum())
-    arrived_cnt = int((status_norm == "ARRIVED").sum())
-    ongoing_cnt = int(status_norm.str.contains("ON GOING|ONGOING", na=False).sum())
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Total", total_patients)
-    m2.metric("Waiting", waiting_cnt)
-    m3.metric("Arrived", arrived_cnt)
-    m4.metric("On Going", ongoing_cnt)
-
-    counts = status_norm.value_counts(dropna=False).reset_index()
-    counts.columns = ["status", "count"]
-
-    if ALTAIR_AVAILABLE and not counts.empty:
-        status_color_map = {
-            "WAITING": COLORS["info"],
-            "PENDING": COLORS["info"],
-            "ARRIVING": COLORS["warning"],
-            "ARRIVED": COLORS["warning"],
-            "ON GOING": COLORS["success"],
-            "ONGOING": COLORS["success"],
-            "DONE": COLORS["info"],
-            "COMPLETED": COLORS["info"],
-            "CANCELLED": COLORS["danger"],
-            "SHIFTED": COLORS["button_bg"],
-            "LATE": COLORS["warning"],
-            "UNKNOWN": COLORS["accent"],
-        }
-        # Provide stable color domain/range for known statuses; unknowns fall back to accent.
-        known_statuses = [s for s in counts["status"].tolist() if s in status_color_map]
-        domain = known_statuses
-        rng = [status_color_map[s] for s in domain]
-
-        chart = (
-            alt.Chart(counts)
-            .mark_bar(cornerRadiusTopRight=6, cornerRadiusBottomRight=6)
-            .encode(
-                x=alt.X("count:Q", title="Patients"),
-                y=alt.Y("status:N", sort="-x", title="Status"),
-                color=alt.Color(
-                    "status:N",
-                    legend=None,
-                    scale=alt.Scale(domain=domain, range=rng),
-                ),
-                tooltip=[
-                    alt.Tooltip("status:N", title="Status"),
-                    alt.Tooltip("count:Q", title="Count"),
-                ],
-            )
-            .properties(height=240)
-        )
-        st.altair_chart(chart, use_container_width=True)
-    else:
-        # Fallback basic chart (non-interactive)
-        st.bar_chart(counts.set_index("status")["count"])
-except Exception:
-    pass
 
 # ================ Full Schedule ================
 st.markdown("### 📅 Full Today's Schedule")
