@@ -306,13 +306,13 @@ st.markdown(
         border-right: none !important;
     }}
     
-    /* Dropdown and Select Styling */
-    [data-baseweb="select"] {{
+    /* Dropdown and Select Styling (scoped to main content, avoid sidebar) */
+    .main [data-baseweb="select"] {{
         background-color: {COLORS['bg_secondary']} !important;
         border-radius: 6px !important;
     }}
     
-    [data-baseweb="select"] button {{
+    .main [data-baseweb="select"] button {{
         color: {COLORS['text_primary']} !important;
         background-color: {COLORS['bg_secondary']} !important;
         border: 1px solid #d3c3b0 !important;
@@ -320,12 +320,12 @@ st.markdown(
         transition: all 0.2s ease !important;
     }}
     
-    [data-baseweb="select"] button:hover {{
+    .main [data-baseweb="select"] button:hover {{
         border-color: {COLORS['button_bg']} !important;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22) !important;
     }}
     
-    [data-baseweb="select"] button span {{
+    .main [data-baseweb="select"] button span {{
         color: {COLORS['text_primary']} !important;
     }}
     
@@ -2783,10 +2783,12 @@ with st.sidebar:
                 st.warning("Please select an assistant")
             else:
                 add_time_block(block_assistant, block_start, block_end, block_reason)
-                save_data(df_raw, show_toast=False, message="Time block saved")
+                save_data(df_raw, show_toast=True, message="Time block saved")
                 st.success(
                     f"✅ Blocked {block_assistant} from {block_start.strftime('%H:%M')} to {block_end.strftime('%H:%M')}"
                 )
+                # Force reload from storage to ensure persistence
+                _sync_time_blocks_from_meta(df_raw)
                 st.rerun()
 
     # Show current time blocks
@@ -2806,7 +2808,9 @@ with st.sidebar:
                     try:
                         actual_idx = st.session_state.time_blocks.index(block)
                         remove_time_block(actual_idx)
-                        save_data(df_raw, show_toast=False, message="Time block removed")
+                        save_data(df_raw, show_toast=True, message="Time block removed")
+                        # Force reload from storage to ensure persistence
+                        _sync_time_blocks_from_meta(df_raw)
                     except Exception:
                         pass
                     st.rerun()
