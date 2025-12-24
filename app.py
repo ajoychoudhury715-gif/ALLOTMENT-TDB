@@ -3329,8 +3329,8 @@ with col_del_btn:
                 st.error(f"Error deleting row: {e}")
 
 with col_search:
-    # Split the search column into patient search and discard button
-    search_col, discard_col = st.columns([4, 1], vertical_alignment="bottom")
+    # Split the search column into patient search and space
+    search_col, discard_col = st.columns([5, 0], vertical_alignment="bottom")
     
     with search_col:
         if USE_SUPABASE and SUPABASE_AVAILABLE:
@@ -3414,10 +3414,7 @@ with col_search:
         else:
             st.caption("🔍 Patient search (Supabase only)")
     
-    with discard_col:
-        if st.button("🔄", key="manual_discard_full", help="Discard changes", use_container_width=True):
-            st.session_state.manual_save_triggered = False
-            st.rerun()
+
 
 
 
