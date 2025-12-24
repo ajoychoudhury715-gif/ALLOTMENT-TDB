@@ -565,8 +565,15 @@ st.markdown(
         width: 20px !important;
         height: 20px !important;
         cursor: pointer !important;
-        transition: all 0.3s ease !important;
+        transition: transform 140ms ease, filter 0.3s ease !important;
         accent-color: #99582f !important;
+    }}
+
+    /* Keyboard focus for table checkboxes */
+    [data-testid="stDataFrameContainer"] input[type="checkbox"]:focus-visible {{
+        outline: 2px solid var(--text-secondary) !important;
+        outline-offset: 3px !important;
+        border-radius: 4px !important;
     }}
 
     [data-testid="stDataFrameContainer"] input[type="checkbox"]:active {{
@@ -574,7 +581,68 @@ st.markdown(
     }}
 
     [data-testid="stDataFrameContainer"] input[type="checkbox"]:checked {{
-        animation: spin-check 0.5s ease !important;
+        animation: tdb-native-checkbox-pop 160ms ease-out, spin-check 0.5s ease !important;
+    }}
+
+    @keyframes tdb-native-checkbox-pop {{
+        0% {{ transform: scale(1); }}
+        60% {{ transform: scale(1.12); }}
+        100% {{ transform: scale(1.06); }}
+    }}
+
+    /* Streamlit (BaseWeb) checkbox animation (for st.checkbox, sidebar toggles, etc.)
+       - Adds a slight "pop" on check
+       - Animates the SVG checkmark stroke so it draws left-to-right
+       - Keeps keyboard accessibility via :focus-visible
+       NOTE: This targets BaseWeb checkbox markup and does NOT touch the data editor's native inputs.
+    */
+    div[data-baseweb="checkbox"] svg path,
+    div[data-baseweb="checkbox"] svg polyline {{
+        stroke-dasharray: 24;
+        stroke-dashoffset: 24;
+        transition: stroke-dashoffset 220ms ease;
+    }}
+
+    /* Draw the tick when checked */
+    div[data-baseweb="checkbox"]:has(input[type="checkbox"]:checked) svg path,
+    div[data-baseweb="checkbox"]:has(input[type="checkbox"]:checked) svg polyline {{
+        stroke-dashoffset: 0;
+    }}
+
+    /* Pop the checkbox icon slightly on check (keeps text stable) */
+    div[data-baseweb="checkbox"]:has(input[type="checkbox"]:checked) svg {{
+        transform-origin: center;
+        animation: tdb-checkbox-pop 160ms ease-out;
+    }}
+
+    @keyframes tdb-checkbox-pop {{
+        0% {{ transform: scale(1); }}
+        60% {{ transform: scale(1.12); }}
+        100% {{ transform: scale(1.06); }}
+    }}
+
+    /* Keyboard focus ring for accessibility */
+    div[data-baseweb="checkbox"]:has(input[type="checkbox"]:focus-visible) svg {{
+        outline: 2px solid var(--text-secondary);
+        outline-offset: 3px;
+        border-radius: 4px;
+    }}
+
+    /* Reduced motion support */
+    @media (prefers-reduced-motion: reduce) {{
+        [data-testid="stDataFrameContainer"] input[type="checkbox"] {{
+            transition: none !important;
+        }}
+        [data-testid="stDataFrameContainer"] input[type="checkbox"]:checked {{
+            animation: none !important;
+        }}
+        div[data-baseweb="checkbox"] svg path,
+        div[data-baseweb="checkbox"] svg polyline {{
+            transition: none;
+        }}
+        div[data-baseweb="checkbox"]:has(input[type="checkbox"]:checked) svg {{
+            animation: none;
+        }}
     }}
     
     /* Divider styling */
