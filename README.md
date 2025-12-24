@@ -33,6 +33,14 @@ A **Streamlit-based real-time scheduling dashboard** for managing dental allotme
 - Change detection with notifications
 - Toast notifications for status updates
 
+🧩 **Assistant Allocation + Time Blocking**
+- Automatic assistant allocation by department (Prosto/Endo) based on time overlap and availability
+- Manual override supported (auto-allocation can be configured to fill only empty slots)
+- **Time blocks** for assistants (backend work, lunch, training) are persisted:
+   - **Supabase**: stored in the same `payload.meta` JSON as the schedule
+   - **Google Sheets**: stored in a separate worksheet named `Meta`
+   - **Excel**: stored in a separate sheet named `Meta`
+
 ## Deployment Options
 
 ### Option 1: Streamlit Cloud (Recommended for Production)
@@ -68,6 +76,30 @@ supabase_key = "YOUR_SUPABASE_ANON_KEY"
 ```
 
 The app will store the whole schedule in a single row (`id = "main"`) as JSON.
+
+##### Supabase RLS (if using `supabase_key` anon key)
+
+If Row Level Security (RLS) is enabled and you use the **anon key**, you must allow your app to read/write the single state row.
+In Supabase → **SQL Editor**, run:
+
+```sql
+alter table tdb_allotment_state enable row level security;
+
+create policy "read main" on tdb_allotment_state
+   for select
+   using (id = 'main');
+
+create policy "insert main" on tdb_allotment_state
+   for insert
+   with check (id = 'main');
+
+create policy "update main" on tdb_allotment_state
+   for update
+   using (id = 'main')
+   with check (id = 'main');
+```
+
+If you don’t want to manage RLS policies, use `supabase_service_role_key` in Streamlit Secrets (server-side) instead.
 
 ##### (Optional) Patient Master List (Supabase)
 

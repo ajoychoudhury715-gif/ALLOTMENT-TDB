@@ -640,6 +640,521 @@ st.markdown(f" {now.strftime('%B %d, %Y - %I:%M:%S %p')} IST")
 # Epoch seconds (used for 30-second snooze timing)
 now_epoch = int(time_module.time())
 
+# ================ DEPARTMENT & STAFF CONFIGURATION ================
+# Departments with their doctors and assistants
+# NOTE: Keep these lists as the single source of truth for dropdowns + allocation.
+def _unique_preserve_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        key = str(item).strip().upper()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+DEPARTMENTS = {
+    "PROSTO": {
+        "doctors": _unique_preserve_order([
+            "DR.HUSSAIN",  # preferred spelling
+            "DR.HUSAIN",   # legacy spelling (kept for compatibility with existing data)
+            "DR.SHIFA",
+        ]),
+        "assistants": _unique_preserve_order([
+            "RAJA",
+            "NITIN",
+            "ANSHIKA",
+            "BABU",
+            "PRAMOTH",
+            "RESHMA",
+        ]),
+    },
+    "ENDO": {
+        "doctors": _unique_preserve_order([
+            "DR.FARHATH",
+            "DR.NIMAI",
+            "DR.SHRUTI",
+            "DR.KALPANA",
+            "DR.MANVEEN",
+            "DR.NEHA",
+        ]),
+        "assistants": _unique_preserve_order([
+            "ANYA",
+            "LAVANYA",
+            "ANSHIKA",  # shared
+            "ROHINI",
+            "MUKHILA",
+            "SHAKSHI",  # as provided
+            "ARCHANA",
+        ]),
+    },
+}
+
+# Combined lists for dropdowns
+ALL_DOCTORS = _unique_preserve_order(DEPARTMENTS["PROSTO"]["doctors"] + DEPARTMENTS["ENDO"]["doctors"])
+ALL_ASSISTANTS = _unique_preserve_order(DEPARTMENTS["PROSTO"]["assistants"] + DEPARTMENTS["ENDO"]["assistants"])
+
+def get_department_for_doctor(doctor_name: str) -> str:
+    """Get the department a doctor belongs to"""
+    if not doctor_name:
+        return ""
+    doc_upper = str(doctor_name).strip().upper()
+    for dept, config in DEPARTMENTS.items():
+        if any(doc_upper == d.upper() or doc_upper in d.upper() for d in config["doctors"]):
+            return dept
+    return ""
+
+def get_assistants_for_department(department: str) -> list:
+    """Get list of assistants for a specific department"""
+    dept_upper = str(department).strip().upper()
+    if dept_upper in DEPARTMENTS:
+        return DEPARTMENTS[dept_upper]["assistants"]
+    return ALL_ASSISTANTS
+
+def get_department_for_assistant(assistant_name: str) -> str:
+    """Get the department an assistant belongs to"""
+    if not assistant_name:
+        return ""
+    assist_upper = str(assistant_name).strip().upper()
+    for dept, config in DEPARTMENTS.items():
+        if any(assist_upper == a.upper() or assist_upper in a.upper() for a in config["assistants"]):
+            return dept
+    # ANSHIKA is shared between departments
+    return "SHARED"
+
+# ================ TIME BLOCKING SYSTEM ================
+# Initialize time blocks in session state
+if "time_blocks" not in st.session_state:
+    st.session_state.time_blocks = []  # List of {assistant, start_time, end_time, reason, date}
+
+def add_time_block(assistant: str, start_time: time, end_time: time, reason: str = "Backend Work"):
+    """Add a time block for an assistant"""
+    today_str = now.strftime("%Y-%m-%d")
+    block = {
+        "assistant": assistant.upper(),
+        "start_time": start_time,
+        "end_time": end_time,
+        "reason": reason,
+        "date": today_str
+    }
+    st.session_state.time_blocks.append(block)
+    return True
+
+def remove_time_block(index: int):
+    """Remove a time block by index"""
+    if 0 <= index < len(st.session_state.time_blocks):
+        st.session_state.time_blocks.pop(index)
+        return True
+    return False
+
+def is_assistant_blocked(assistant: str, check_time: time) -> tuple[bool, str]:
+    """Check if an assistant is blocked at a specific time. Returns (is_blocked, reason)"""
+    if not assistant or not check_time:
+        return False, ""
+    
+    assist_upper = str(assistant).strip().upper()
+    today_str = now.strftime("%Y-%m-%d")
+    check_minutes = check_time.hour * 60 + check_time.minute
+    
+    for block in st.session_state.time_blocks:
+        if block["date"] != today_str:
+            continue
+        if block["assistant"].upper() != assist_upper:
+            continue
+        
+        start_min = block["start_time"].hour * 60 + block["start_time"].minute
+        end_min = block["end_time"].hour * 60 + block["end_time"].minute
+        
+        if start_min <= check_minutes <= end_min:
+            return True, block.get("reason", "Blocked")
+    
+    return False, ""
+
+
+def _time_to_hhmm(t: time | None) -> str:
+    if t is None:
+        return ""
+    return f"{t.hour:02d}:{t.minute:02d}"
+
+
+def _serialize_time_blocks(blocks: list[dict]) -> list[dict]:
+    """Convert session_state time blocks into JSON-safe primitives."""
+    out: list[dict] = []
+    for b in blocks or []:
+        try:
+            assistant = str(b.get("assistant", "")).strip().upper()
+            date = str(b.get("date", "")).strip()
+            reason = str(b.get("reason", "Backend Work")).strip() or "Backend Work"
+            start_t = b.get("start_time")
+            end_t = b.get("end_time")
+            start_obj = _coerce_to_time_obj(start_t)
+            end_obj = _coerce_to_time_obj(end_t)
+            out.append(
+                {
+                    "assistant": assistant,
+                    "date": date,
+                    "reason": reason,
+                    "start_time": _time_to_hhmm(start_obj),
+                    "end_time": _time_to_hhmm(end_obj),
+                }
+            )
+        except Exception:
+            continue
+    return out
+
+
+def _deserialize_time_blocks(value) -> list[dict]:
+    """Parse stored meta value into session_state-compatible time blocks."""
+    if value is None or value == "":
+        return []
+
+    raw = value
+    if isinstance(value, str):
+        try:
+            raw = json.loads(value)
+        except Exception:
+            return []
+
+    if not isinstance(raw, list):
+        return []
+
+    out: list[dict] = []
+    for b in raw:
+        if not isinstance(b, dict):
+            continue
+        assistant = str(b.get("assistant", "")).strip().upper()
+        date = str(b.get("date", "")).strip()
+        reason = str(b.get("reason", "Backend Work")).strip() or "Backend Work"
+        start_obj = _coerce_to_time_obj(b.get("start_time"))
+        end_obj = _coerce_to_time_obj(b.get("end_time"))
+        if not assistant or not date or start_obj is None or end_obj is None:
+            continue
+        out.append(
+            {
+                "assistant": assistant,
+                "date": date,
+                "reason": reason,
+                "start_time": start_obj,
+                "end_time": end_obj,
+            }
+        )
+    return out
+
+
+def _get_meta_from_df(df_any: pd.DataFrame | None) -> dict:
+    try:
+        if df_any is not None and hasattr(df_any, "attrs"):
+            meta = df_any.attrs.get("meta")
+            if isinstance(meta, dict):
+                return dict(meta)
+    except Exception:
+        pass
+    return {}
+
+
+def _set_meta_on_df(df_any: pd.DataFrame, meta: dict) -> None:
+    try:
+        if hasattr(df_any, "attrs"):
+            df_any.attrs["meta"] = dict(meta or {})
+    except Exception:
+        pass
+
+
+def _sync_time_blocks_from_meta(df_any: pd.DataFrame | None) -> None:
+    """Load persisted time blocks into session_state (once per run)."""
+    try:
+        meta = _get_meta_from_df(df_any)
+        if "time_blocks" in meta:
+            blocks = _deserialize_time_blocks(meta.get("time_blocks"))
+            st.session_state.time_blocks = blocks
+    except Exception:
+        pass
+
+
+def _apply_time_blocks_to_meta(meta: dict) -> dict:
+    out = dict(meta or {})
+    out["time_blocks"] = _serialize_time_blocks(st.session_state.get("time_blocks", []))
+    out["time_blocks_updated_at"] = datetime.now(IST).isoformat()
+    return out
+
+# ================ ASSISTANT AVAILABILITY TRACKING ================
+def get_assistant_schedule(assistant_name: str, df_schedule: pd.DataFrame) -> list:
+    """Get all appointments where this assistant is assigned"""
+    if not assistant_name or df_schedule.empty:
+        return []
+    
+    assist_upper = str(assistant_name).strip().upper()
+    appointments = []
+    
+    for idx, row in df_schedule.iterrows():
+        # Check FIRST, SECOND, Third columns
+        for col in ["FIRST", "SECOND", "Third"]:
+            if col in row.index:
+                val = str(row.get(col, "")).strip().upper()
+                if val == assist_upper:
+                    # Skip cancelled/done/shifted appointments
+                    status = str(row.get("STATUS", "")).strip().upper()
+                    if any(s in status for s in ["CANCELLED", "DONE", "SHIFTED"]):
+                        continue
+                    
+                    appointments.append({
+                        "row_id": row.get("REMINDER_ROW_ID", ""),
+                        "patient": row.get("Patient Name", "Unknown"),
+                        "in_time": row.get("In Time"),
+                        "out_time": row.get("Out Time"),
+                        "doctor": row.get("DR.", ""),
+                        "op": row.get("OP", ""),
+                        "role": col,
+                        "status": status
+                    })
+    
+    return appointments
+
+def is_assistant_available(
+    assistant_name: str,
+    check_in_time,
+    check_out_time,
+    df_schedule: pd.DataFrame,
+    exclude_row_id: str | None = None,
+) -> tuple[bool, str]:
+    """
+    Check if an assistant is available during a time window.
+    Returns (is_available, conflict_reason)
+    """
+    if not assistant_name:
+        return False, "No assistant specified"
+    
+    assist_upper = str(assistant_name).strip().upper()
+    
+    # Convert check times to minutes
+    check_in = _coerce_to_time_obj(check_in_time)
+    check_out = _coerce_to_time_obj(check_out_time)
+    
+    if check_in is None or check_out is None:
+        return True, ""  # Can't determine, assume available
+    
+    check_in_min = check_in.hour * 60 + check_in.minute
+    check_out_min = check_out.hour * 60 + check_out.minute
+    if check_out_min < check_in_min:
+        check_out_min += 1440  # Overnight
+    
+    # Check time blocks first (overlap against the whole appointment window)
+    try:
+        today_str = now.strftime("%Y-%m-%d")
+        for block in st.session_state.get("time_blocks", []):
+            if str(block.get("date", "")).strip() != today_str:
+                continue
+            if str(block.get("assistant", "")).strip().upper() != assist_upper:
+                continue
+
+            start_t = _coerce_to_time_obj(block.get("start_time"))
+            end_t = _coerce_to_time_obj(block.get("end_time"))
+            if start_t is None or end_t is None:
+                continue
+
+            start_min = start_t.hour * 60 + start_t.minute
+            end_min = end_t.hour * 60 + end_t.minute
+            if end_min < start_min:
+                end_min += 1440
+
+            if not (check_out_min <= start_min or check_in_min >= end_min):
+                return False, f"Blocked: {block.get('reason', 'Blocked')}"
+    except Exception:
+        pass
+    
+    # Check existing appointments
+    schedule = get_assistant_schedule(assist_upper, df_schedule)
+    
+    for appt in schedule:
+        # Skip if it's the same row we're editing
+        if exclude_row_id and str(appt.get("row_id", "")).strip() == str(exclude_row_id).strip():
+            continue
+        
+        appt_in = _coerce_to_time_obj(appt.get("in_time"))
+        appt_out = _coerce_to_time_obj(appt.get("out_time"))
+        
+        if appt_in is None or appt_out is None:
+            continue
+        
+        appt_in_min = appt_in.hour * 60 + appt_in.minute
+        appt_out_min = appt_out.hour * 60 + appt_out.minute
+        if appt_out_min < appt_in_min:
+            appt_out_min += 1440
+        
+        # Check for overlap
+        if not (check_out_min <= appt_in_min or check_in_min >= appt_out_min):
+            return False, f"With {appt.get('patient', 'patient')} ({appt_in.strftime('%H:%M')}-{appt_out.strftime('%H:%M')})"
+    
+    return True, ""
+
+def get_available_assistants(
+    department: str,
+    check_in_time,
+    check_out_time,
+    df_schedule: pd.DataFrame,
+    exclude_row_id: str | None = None,
+) -> list:
+    """
+    Get list of available assistants for a department at a specific time.
+    Returns list of dicts with assistant name and availability status.
+    """
+    assistants = get_assistants_for_department(department)
+    available = []
+    
+    for assistant in assistants:
+        is_avail, reason = is_assistant_available(assistant, check_in_time, check_out_time, df_schedule, exclude_row_id)
+        available.append({
+            "name": assistant,
+            "available": is_avail,
+            "reason": reason if not is_avail else "Available"
+        })
+    
+    return available
+
+def auto_allocate_assistants(
+    doctor: str,
+    in_time,
+    out_time,
+    df_schedule: pd.DataFrame,
+    exclude_row_id: str | None = None,
+) -> dict:
+    """
+    Automatically allocate assistants based on department and availability.
+    Returns dict with FIRST, SECOND, Third assignments.
+    """
+    result = {"FIRST": "", "SECOND": "", "Third": ""}
+    
+    department = get_department_for_doctor(doctor)
+    if not department:
+        return result
+    
+    available_list = get_available_assistants(department, in_time, out_time, df_schedule, exclude_row_id)
+    
+    # Filter to only available assistants
+    free_assistants = [a["name"] for a in available_list if a["available"]]
+    
+    # Assign up to 3 assistants
+    roles = ["FIRST", "SECOND", "Third"]
+    for i, role in enumerate(roles):
+        if i < len(free_assistants):
+            result[role] = free_assistants[i]
+    
+    return result
+
+
+def _auto_fill_assistants_for_row(df_schedule: pd.DataFrame, row_index: int, only_fill_empty: bool = True) -> bool:
+    """Auto-fill FIRST/SECOND/Third for a single row. Returns True if anything changed."""
+    try:
+        if row_index < 0 or row_index >= len(df_schedule):
+            return False
+
+        doctor = str(df_schedule.at[row_index, "DR."] if "DR." in df_schedule.columns else "").strip()
+        in_time_val = df_schedule.at[row_index, "In Time"] if "In Time" in df_schedule.columns else None
+        out_time_val = df_schedule.at[row_index, "Out Time"] if "Out Time" in df_schedule.columns else None
+        row_id = str(df_schedule.at[row_index, "REMINDER_ROW_ID"] if "REMINDER_ROW_ID" in df_schedule.columns else "").strip()
+
+        if not doctor:
+            return False
+        if _coerce_to_time_obj(in_time_val) is None or _coerce_to_time_obj(out_time_val) is None:
+            return False
+
+        department = get_department_for_doctor(doctor)
+        if not department:
+            return False
+
+        current_first = str(df_schedule.at[row_index, "FIRST"] if "FIRST" in df_schedule.columns else "").strip()
+        current_second = str(df_schedule.at[row_index, "SECOND"] if "SECOND" in df_schedule.columns else "").strip()
+        current_third = str(df_schedule.at[row_index, "Third"] if "Third" in df_schedule.columns else "").strip()
+
+        if only_fill_empty and (current_first and current_second and current_third):
+            return False
+
+        already = {x.strip().upper() for x in [current_first, current_second, current_third] if x and x.lower() not in {"nan", "none"}}
+
+        # Compute free assistants for this time window, excluding this same row.
+        avail = get_available_assistants(department, in_time_val, out_time_val, df_schedule, exclude_row_id=row_id)
+        free = [a["name"] for a in avail if a.get("available")]
+        free = [a for a in free if a.strip().upper() not in already]
+
+        changed = False
+        roles = [("FIRST", current_first), ("SECOND", current_second), ("Third", current_third)]
+        pick_i = 0
+        for role, current_val in roles:
+            if only_fill_empty and current_val and str(current_val).strip() and str(current_val).strip().lower() not in {"nan", "none"}:
+                continue
+            if pick_i >= len(free):
+                break
+            df_schedule.at[row_index, role] = free[pick_i]
+            already.add(str(free[pick_i]).strip().upper())
+            pick_i += 1
+            changed = True
+
+        return changed
+    except Exception:
+        return False
+
+def get_current_assistant_status(df_schedule: pd.DataFrame) -> dict:
+    """
+    Get real-time status of all assistants.
+    Returns dict with assistant name -> status info
+    """
+    status = {}
+    current_time = time(now.hour, now.minute)
+    current_min = now.hour * 60 + now.minute
+    
+    for assistant in ALL_ASSISTANTS:
+        assist_upper = assistant.upper()
+        
+        # Check if blocked
+        is_blocked, block_reason = is_assistant_blocked(assist_upper, current_time)
+        if is_blocked:
+            status[assist_upper] = {
+                "status": "BLOCKED",
+                "reason": block_reason,
+                "department": get_department_for_assistant(assist_upper)
+            }
+            continue
+        
+        # Check current appointments
+        schedule = get_assistant_schedule(assist_upper, df_schedule)
+        current_appt = None
+        
+        for appt in schedule:
+            appt_in = _coerce_to_time_obj(appt.get("in_time"))
+            appt_out = _coerce_to_time_obj(appt.get("out_time"))
+            
+            if appt_in is None or appt_out is None:
+                continue
+            
+            appt_in_min = appt_in.hour * 60 + appt_in.minute
+            appt_out_min = appt_out.hour * 60 + appt_out.minute
+            if appt_out_min < appt_in_min:
+                appt_out_min += 1440
+            
+            if appt_in_min <= current_min <= appt_out_min:
+                current_appt = appt
+                break
+        
+        if current_appt:
+            status[assist_upper] = {
+                "status": "BUSY",
+                "reason": f"With {current_appt.get('patient', 'patient')}",
+                "patient": current_appt.get("patient", ""),
+                "doctor": current_appt.get("doctor", ""),
+                "op": current_appt.get("op", ""),
+                "department": get_department_for_assistant(assist_upper)
+            }
+        else:
+            status[assist_upper] = {
+                "status": "FREE",
+                "reason": "Available",
+                "department": get_department_for_assistant(assist_upper)
+            }
+    
+    return status
+
 # --- Reminder settings in sidebar ---
 with st.sidebar:
     st.markdown("## 🔔 Notifications")
@@ -657,6 +1172,22 @@ with st.sidebar:
         key="default_snooze_seconds",
     )
     st.write("💡 Reminders alert 15 minutes before a patient's In Time.")
+
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("## 🤖 Assistant Allocation")
+    st.checkbox(
+        "Auto-assign assistants on save",
+        value=True,
+        key="auto_assign_assistants",
+        help="Fills FIRST/SECOND/Third when doctor + times are set.",
+    )
+    st.checkbox(
+        "Only fill empty slots",
+        value=True,
+        key="auto_assign_only_empty",
+        help="Keeps any manual assignments you already chose.",
+    )
 
 # ================ Data Storage Configuration ================
 # Determine whether to use Google Sheets (cloud) or local Excel file
@@ -1035,6 +1566,14 @@ def load_data_from_supabase(_url: str, _key: str, _table: str, _row_id: str):
             if col not in df.columns:
                 df[col] = ""
         df = df[columns]
+
+        # Optional metadata (e.g., assistant time blocks)
+        try:
+            meta = payload.get("meta")
+            if isinstance(meta, dict):
+                df.attrs["meta"] = dict(meta)
+        except Exception:
+            pass
         return df
     except Exception as e:
         st.error(f"Error loading from Supabase: {e}")
@@ -1055,6 +1594,14 @@ def save_data_to_supabase(_url: str, _key: str, _table: str, _row_id: str, df: p
             "columns": df_clean.columns.tolist(),
             "rows": df_clean.to_dict(orient="records"),
         }
+
+        # Optional metadata (stored alongside rows/columns)
+        try:
+            meta = _get_meta_from_df(df)
+            meta = _apply_time_blocks_to_meta(meta)
+            payload["meta"] = meta
+        except Exception:
+            pass
         client.table(_table).upsert({"id": _row_id, "payload": payload}).execute()
         load_data_from_supabase.clear()
         return True
@@ -1104,10 +1651,20 @@ if SUPABASE_AVAILABLE:
                 )
                 st.markdown(
                     "If you use the **anon key**, you may need to adjust Row Level Security (RLS). "
-                    "Simplest (not recommended for public apps):"
+                    "Recommended: enable RLS and add policies allowing the single state row (id = 'main'):"
                 )
                 st.code(
-                    "alter table tdb_allotment_state disable row level security;\n",
+                    "alter table tdb_allotment_state enable row level security;\n\n"
+                    "create policy \"read main\" on tdb_allotment_state\n"
+                    "  for select\n"
+                    "  using (id = 'main');\n\n"
+                    "create policy \"insert main\" on tdb_allotment_state\n"
+                    "  for insert\n"
+                    "  with check (id = 'main');\n\n"
+                    "create policy \"update main\" on tdb_allotment_state\n"
+                    "  for update\n"
+                    "  using (id = 'main')\n"
+                    "  with check (id = 'main');\n",
                     language="sql",
                 )
     except Exception as e:
@@ -1348,20 +1905,71 @@ if (not USE_SUPABASE) and GSHEETS_AVAILABLE:
 def load_data_from_gsheets(_worksheet):
     """Load data from Google Sheets worksheet"""
     try:
+        meta: dict = {}
+        try:
+            meta = load_meta_from_gsheets(_worksheet)
+        except Exception:
+            meta = {}
+
         data = _worksheet.get_all_records()
         if not data:
             # Return empty dataframe with expected columns
-            return pd.DataFrame(columns=[
+            df_empty = pd.DataFrame(columns=[
                 "Patient Name", "In Time", "Out Time", "Procedure", "DR.", 
                 "FIRST", "SECOND", "Third", "CASE PAPER", "OP", 
                 "SUCTION", "CLEANING", "STATUS", "REMINDER_ROW_ID",
                 "REMINDER_SNOOZE_UNTIL", "REMINDER_DISMISSED"
             ])
+            df_empty.attrs["meta"] = meta
+            return df_empty
         df = pd.DataFrame(data)
+        df.attrs["meta"] = meta
         return df
     except Exception as e:
         st.error(f"Error loading from Google Sheets: {e}")
         return None
+
+
+def _get_or_create_gsheets_meta_worksheet(_worksheet):
+    """Return the 'Meta' worksheet for the same spreadsheet, creating it if needed."""
+    # gspread worksheet has .spreadsheet
+    ss = getattr(_worksheet, "spreadsheet", None)
+    if ss is None:
+        raise RuntimeError("Unable to access spreadsheet from worksheet")
+    try:
+        return ss.worksheet("Meta")
+    except Exception:
+        try:
+            return ss.add_worksheet(title="Meta", rows=50, cols=2)
+        except Exception:
+            # Some environments disallow sheet creation; treat as non-fatal.
+            return None
+
+
+@st.cache_data(ttl=30)
+def load_meta_from_gsheets(_worksheet) -> dict:
+    """Load metadata from a 'Meta' worksheet (2 columns: key, value)."""
+    ws = _get_or_create_gsheets_meta_worksheet(_worksheet)
+    if ws is None:
+        return {}
+    values = ws.get_all_values()
+    if not values:
+        return {}
+
+    # Accept either with or without header row
+    meta: dict[str, str] = {}
+    start_row = 0
+    if len(values[0]) >= 2 and str(values[0][0]).strip().lower() in {"key", "k"}:
+        start_row = 1
+    for r in values[start_row:]:
+        if not r or len(r) < 2:
+            continue
+        k = str(r[0]).strip()
+        v = str(r[1]).strip()
+        if not k:
+            continue
+        meta[k] = v
+    return dict(meta)
 
 def save_data_to_gsheets(worksheet, df):
     """Save dataframe to Google Sheets worksheet"""
@@ -1383,6 +1991,18 @@ def save_data_to_gsheets(worksheet, df):
         # Write data
         values = [headers] + df_clean.values.tolist()
         worksheet.update(values, 'A1')
+
+        # Persist metadata (time blocks) to Meta sheet
+        try:
+            meta_ws = _get_or_create_gsheets_meta_worksheet(worksheet)
+            if meta_ws is not None:
+                meta = _apply_time_blocks_to_meta(_get_meta_from_df(df))
+                meta_ws.clear()
+                meta_ws.update([["key", "value"]] + [[k, json.dumps(v) if isinstance(v, (dict, list)) else str(v)] for k, v in meta.items()], "A1")
+                load_meta_from_gsheets.clear()
+        except Exception:
+            # Non-fatal: schedule should still save
+            pass
         
         # Clear the cache so next load gets fresh data
         load_data_from_gsheets.clear()
@@ -1451,7 +2071,30 @@ else:
     
     for attempt in range(max_retries):
         try:
-            df_raw = pd.read_excel(file_path, sheet_name="Sheet1")
+            meta: dict[str, str] = {}
+            with pd.ExcelFile(file_path, engine="openpyxl") as xls:
+                df_raw = pd.read_excel(xls, sheet_name="Sheet1")
+                try:
+                    if "Meta" in xls.sheet_names:
+                        meta_df = pd.read_excel(xls, sheet_name="Meta")
+                        if not meta_df.empty:
+                            # Expect columns: key, value (case-insensitive)
+                            cols = {str(c).strip().lower(): c for c in meta_df.columns}
+                            kcol = cols.get("key")
+                            vcol = cols.get("value")
+                            if kcol and vcol:
+                                for _, r in meta_df.iterrows():
+                                    k = str(r.get(kcol, "")).strip()
+                                    v = str(r.get(vcol, "")).strip()
+                                    if k:
+                                        meta[k] = v
+                except Exception:
+                    meta = {}
+            try:
+                if df_raw is not None:
+                    df_raw.attrs["meta"] = dict(meta)
+            except Exception:
+                pass
             break  # Success, exit retry loop
         except (zipfile.BadZipFile, Exception) as e:
             if "BadZipFile" in str(type(e).__name__) or "Truncated" in str(e) or "corrupt" in str(e).lower():
@@ -1470,6 +2113,30 @@ else:
 
 # Clean column names
 df_raw.columns = [col.strip() for col in df_raw.columns]
+
+# Load persisted time blocks (if present) from storage metadata
+_sync_time_blocks_from_meta(df_raw)
+
+
+def _collect_unique_upper(df_any: pd.DataFrame, col_name: str) -> list[str]:
+    try:
+        if col_name not in df_any.columns:
+            return []
+        s = df_any[col_name].astype(str).replace("nan", "").fillna("")
+        vals = [str(v).strip().upper() for v in s.tolist() if str(v).strip()]
+        return _unique_preserve_order(vals)
+    except Exception:
+        return []
+
+
+# Dropdown options: keep configured lists + include any existing values from data
+_extra_doctors = _collect_unique_upper(df_raw, "DR.")
+DOCTOR_OPTIONS = _unique_preserve_order(ALL_DOCTORS + _extra_doctors)
+
+_extra_assistants: list[str] = []
+for _c in ["FIRST", "SECOND", "Third", "CASE PAPER"]:
+    _extra_assistants.extend(_collect_unique_upper(df_raw, _c))
+ASSISTANT_OPTIONS = _unique_preserve_order(ALL_ASSISTANTS + _extra_assistants)
 
 
 # Process data
@@ -1735,12 +2402,86 @@ def save_data(dataframe, show_toast=True, message="Data saved!"):
         else:
             with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
                 dataframe.to_excel(writer, sheet_name='Sheet1', index=False)
+                # Persist metadata (time blocks) into a separate sheet
+                try:
+                    meta = _apply_time_blocks_to_meta(_get_meta_from_df(dataframe))
+                    meta_rows = []
+                    for k, v in meta.items():
+                        if isinstance(v, (dict, list)):
+                            meta_rows.append({"key": str(k), "value": json.dumps(v)})
+                        else:
+                            meta_rows.append({"key": str(k), "value": str(v)})
+                    pd.DataFrame(meta_rows).to_excel(writer, sheet_name='Meta', index=False)
+                except Exception:
+                    pass
             if show_toast:
                 st.toast(f"💾 {message}", icon="✅")
             return True
     except Exception as e:
         st.error(f"Error saving data: {e}")
         return False
+
+
+# ================ TIME BLOCKING UI (persisted) ================
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("## ⏰ Time Blocking")
+    st.caption("Block assistants for backend work")
+
+    with st.expander("➕ Add Time Block", expanded=False):
+        block_assistant = st.selectbox(
+            "Assistant",
+            options=[""] + ALL_ASSISTANTS,
+            key="block_assistant_select",
+        )
+
+        col_start, col_end = st.columns(2)
+        with col_start:
+            block_start = st.time_input("Start Time", value=time(9, 0), key="block_start_time")
+        with col_end:
+            block_end = st.time_input("End Time", value=time(10, 0), key="block_end_time")
+
+        block_reason = st.text_input(
+            "Reason",
+            value="Backend Work",
+            key="block_reason_input",
+            placeholder="e.g., Lunch, Training, Backend Work",
+        )
+
+        if st.button("🔒 Add Block", key="add_block_btn", use_container_width=True):
+            if not block_assistant:
+                st.warning("Please select an assistant")
+            else:
+                add_time_block(block_assistant, block_start, block_end, block_reason)
+                save_data(df_raw, show_toast=False, message="Time block saved")
+                st.success(
+                    f"✅ Blocked {block_assistant} from {block_start.strftime('%H:%M')} to {block_end.strftime('%H:%M')}"
+                )
+                st.rerun()
+
+    # Show current time blocks
+    if st.session_state.get("time_blocks"):
+        st.markdown("**Current Blocks:**")
+        today_str = now.strftime("%Y-%m-%d")
+        today_blocks = [b for b in st.session_state.time_blocks if b.get("date") == today_str]
+
+        for i, block in enumerate(today_blocks):
+            col_info, col_del = st.columns([4, 1])
+            with col_info:
+                st.caption(
+                    f"🚫 {block['assistant']}: {block['start_time'].strftime('%H:%M')}-{block['end_time'].strftime('%H:%M')} ({block.get('reason','')})"
+                )
+            with col_del:
+                if st.button("❌", key=f"del_block_{i}", help="Remove this block"):
+                    try:
+                        actual_idx = st.session_state.time_blocks.index(block)
+                        remove_time_block(actual_idx)
+                        save_data(df_raw, show_toast=False, message="Time block removed")
+                    except Exception:
+                        pass
+                    st.rerun()
+    else:
+        st.caption("No time blocks set for today")
 
 # Helper to persist reminder state
 def _persist_reminder_to_storage(row_id, until, dismissed):
@@ -2287,7 +3028,7 @@ edited_all = st.data_editor(
         "Procedure": st.column_config.TextColumn(label="Procedure"),
         "DR.": st.column_config.SelectboxColumn(
             label="DR.",
-            options=["DR.HUSAIN", "DR.FARHATH", "DR.KALPANA", "DR.SHIFA", "DR.SHRUTI", "DR.NIMAI", "DR.MANVEEN", "DR.NEHA"],
+            options=DOCTOR_OPTIONS,
             required=False
         ),
         "OP": st.column_config.SelectboxColumn(
@@ -2297,22 +3038,22 @@ edited_all = st.data_editor(
         ),
         "FIRST": st.column_config.SelectboxColumn(
             label="FIRST",
-            options=["RAJA", "NITIN", "BABU", "PRAMOTH", "RESHMA", "ANSHIKA", "ARCHANA", "LAVNYA", "SAKSHI", "MUKHILA", "ROHINI", "SUHASNI"],
+            options=ASSISTANT_OPTIONS,
             required=False
         ),
         "SECOND": st.column_config.SelectboxColumn(
             label="SECOND",
-            options=["RAJA", "NITIN", "BABU", "PRAMOTH", "RESHMA", "ANSHIKA", "ARCHANA", "LAVNYA", "SAKSHI", "MUKHILA", "ROHINI", "SUHASNI"],
+            options=ASSISTANT_OPTIONS,
             required=False
         ),
         "Third": st.column_config.SelectboxColumn(
             label="Third",
-            options=["RAJA", "NITIN", "BABU", "PRAMOTH", "RESHMA", "ANSHIKA", "ARCHANA", "LAVNYA", "SAKSHI", "MUKHILA", "ROHINI", "SUHASNI"],
+            options=ASSISTANT_OPTIONS,
             required=False
         ),
         "CASE PAPER": st.column_config.SelectboxColumn(
             label="CASE PAPER",
-            options=["RAJA", "NITIN", "BABU", "PRAMOTH", "RESHMA", "ANSHIKA", "ARCHANA", "LAVNYA", "SAKSHI", "MUKHILA", "ROHINI", "SUHASNI"],
+            options=ASSISTANT_OPTIONS,
             required=False
         ),
         "SUCTION": st.column_config.CheckboxColumn(label="✨ SUCTION"),
@@ -2350,6 +3091,9 @@ if edited_all is not None:
         try:
             # Create a copy of the raw data to update
             df_updated = df_raw.copy()
+
+            # Track which rows are worth attempting auto-allocation for
+            allocation_candidates: set[int] = set()
             
             # Process edited data and convert back to original format
             for idx, row in edited_all.iterrows():
@@ -2406,6 +3150,9 @@ if edited_all is not None:
                                 val = row[col]
                                 clean_val = str(val).strip() if val and str(val) != "nan" else ""
                                 df_updated.iloc[orig_idx, df_updated.columns.get_loc(col)] = clean_val
+
+                        # Candidate for allocation if doctor+times exist (helper will decide)
+                        allocation_candidates.add(orig_idx)
                         
                         # Handle checkbox columns (SUCTION, CLEANING) - convert boolean to check mark or empty
                         for col in ["SUCTION", "CLEANING"]:
@@ -2421,6 +3168,12 @@ if edited_all is not None:
                     except Exception as col_error:
                         st.warning(f"Warning updating row {orig_idx}: {str(col_error)}")
                         continue
+
+            # Auto-allocate assistants after applying all row edits
+            if bool(st.session_state.get("auto_assign_assistants", True)):
+                only_empty = bool(st.session_state.get("auto_assign_only_empty", True))
+                for ix in sorted(allocation_candidates):
+                    _auto_fill_assistants_for_row(df_updated, ix, only_fill_empty=only_empty)
             
             # Write back to storage
             save_data(df_updated, message="Schedule updated!")
@@ -2462,7 +3215,7 @@ if unique_ops:
                     "Out Time": st.column_config.TimeColumn(label="Out Time", format="hh:mm A"),
                     "DR.": st.column_config.SelectboxColumn(
                         label="DR.",
-                        options=["DR.HUSAIN", "DR.FARHATH", "DR.KALPANA", "DR.SHIFA", "DR.SHRUTI", "DR.NIMAI", "DR.MANVEEN", "DR.NEHA"],
+                        options=DOCTOR_OPTIONS,
                         required=False
                     ),
                     "OP": st.column_config.SelectboxColumn(
@@ -2472,22 +3225,22 @@ if unique_ops:
                     ),
                     "FIRST": st.column_config.SelectboxColumn(
                         label="FIRST",
-                        options=["RAJA", "NITIN", "BABU", "PRAMOTH", "RESHMA", "ANSHIKA", "ARCHANA", "LAVNYA", "SAKSHI", "MUKHILA", "ROHINI", "SUHASNI"],
+                        options=ASSISTANT_OPTIONS,
                         required=False
                     ),
                     "SECOND": st.column_config.SelectboxColumn(
                         label="SECOND",
-                        options=["RAJA", "NITIN", "BABU", "PRAMOTH", "RESHMA", "ANSHIKA", "ARCHANA", "LAVNYA", "SAKSHI", "MUKHILA", "ROHINI", "SUHASNI"],
+                        options=ASSISTANT_OPTIONS,
                         required=False
                     ),
                     "Third": st.column_config.SelectboxColumn(
                         label="Third",
-                        options=["RAJA", "NITIN", "BABU", "PRAMOTH", "RESHMA", "ANSHIKA", "ARCHANA", "LAVNYA", "SAKSHI", "MUKHILA", "ROHINI", "SUHASNI"],
+                        options=ASSISTANT_OPTIONS,
                         required=False
                     ),
                     "CASE PAPER": st.column_config.SelectboxColumn(
                         label="CASE PAPER",
-                        options=["RAJA", "NITIN", "BABU", "PRAMOTH", "RESHMA", "ANSHIKA", "ARCHANA", "LAVNYA", "SAKSHI", "MUKHILA", "ROHINI", "SUHASNI"],
+                        options=ASSISTANT_OPTIONS,
                         required=False
                     ),
                     "STATUS": st.column_config.SelectboxColumn(
@@ -2519,6 +3272,7 @@ if unique_ops:
                 if op_has_changes:
                     try:
                         df_updated = df_raw.copy()
+                        allocation_candidates: set[int] = set()
                         for _, row in edited_op.iterrows():
                             orig_idx = row.get("_orig_idx")
                             if pd.isna(orig_idx):
@@ -2559,6 +3313,8 @@ if unique_ops:
                                     clean_val = str(val).strip() if val and str(val) != "nan" else ""
                                     df_updated.iloc[orig_idx, df_updated.columns.get_loc(c)] = clean_val
 
+                            allocation_candidates.add(orig_idx)
+
                             for c in ["SUCTION", "CLEANING"]:
                                 if c in row.index and c in df_updated.columns:
                                     val = row.get(c)
@@ -2568,6 +3324,11 @@ if unique_ops:
                                         df_updated.iloc[orig_idx, df_updated.columns.get_loc(c)] = "✓"
                                     else:
                                         df_updated.iloc[orig_idx, df_updated.columns.get_loc(c)] = ""
+
+                        if bool(st.session_state.get("auto_assign_assistants", True)):
+                            only_empty = bool(st.session_state.get("auto_assign_only_empty", True))
+                            for ix in sorted(allocation_candidates):
+                                _auto_fill_assistants_for_row(df_updated, ix, only_fill_empty=only_empty)
 
                         save_data(df_updated, message=f"Schedule updated for {op}!")
                         st.rerun()
@@ -2592,3 +3353,151 @@ if groupby_column in df.columns and not df[groupby_column].isnull().all():
         st.error(f"Error processing doctor data: {e}")
 else:
     st.info(f"Column '{groupby_column}' not found or contains only empty values.")
+
+# ================ ASSISTANT AVAILABILITY DASHBOARD ================
+st.markdown("### 👥 Assistant Availability Dashboard")
+
+# Get current status of all assistants
+assistant_status = get_current_assistant_status(df)
+
+# Create tabs for each department
+dept_tabs = st.tabs(["📊 All Assistants", "🦷 PROSTO Department", "🔬 ENDO Department"])
+
+with dept_tabs[0]:
+    # Summary cards
+    free_count = sum(1 for s in assistant_status.values() if s["status"] == "FREE")
+    busy_count = sum(1 for s in assistant_status.values() if s["status"] == "BUSY")
+    blocked_count = sum(1 for s in assistant_status.values() if s["status"] == "BLOCKED")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Assistants", len(assistant_status))
+    with col2:
+        st.metric("🟢 Free", free_count)
+    with col3:
+        st.metric("🔴 Busy", busy_count)
+    with col4:
+        st.metric("🚫 Blocked", blocked_count)
+    
+    # Status table
+    status_data = []
+    for name, info in sorted(assistant_status.items()):
+        status_emoji = "🟢" if info["status"] == "FREE" else ("🔴" if info["status"] == "BUSY" else "🚫")
+        status_data.append({
+            "Status": status_emoji,
+            "Assistant": name,
+            "Department": info.get("department", ""),
+            "Current Status": info["status"],
+            "Details": info.get("reason", "")
+        })
+    
+    if status_data:
+        st.dataframe(pd.DataFrame(status_data), use_container_width=True, hide_index=True)
+
+with dept_tabs[1]:
+    st.markdown("**PROSTO Department Assistants**")
+    prosto_assistants = DEPARTMENTS["PROSTO"]["assistants"]
+    
+    for assistant in prosto_assistants:
+        assist_upper = assistant.upper()
+        info = assistant_status.get(assist_upper, {"status": "UNKNOWN", "reason": ""})
+        
+        if info["status"] == "FREE":
+            st.success(f"🟢 **{assistant}** - Available")
+        elif info["status"] == "BUSY":
+            st.warning(f"🔴 **{assistant}** - {info.get('reason', 'Busy')}")
+        elif info["status"] == "BLOCKED":
+            st.error(f"🚫 **{assistant}** - Blocked: {info.get('reason', '')}")
+        else:
+            st.info(f"❓ **{assistant}** - Status unknown")
+
+with dept_tabs[2]:
+    st.markdown("**ENDO Department Assistants**")
+    endo_assistants = DEPARTMENTS["ENDO"]["assistants"]
+    
+    for assistant in endo_assistants:
+        assist_upper = assistant.upper()
+        info = assistant_status.get(assist_upper, {"status": "UNKNOWN", "reason": ""})
+        
+        if info["status"] == "FREE":
+            st.success(f"🟢 **{assistant}** - Available")
+        elif info["status"] == "BUSY":
+            st.warning(f"🔴 **{assistant}** - {info.get('reason', 'Busy')}")
+        elif info["status"] == "BLOCKED":
+            st.error(f"🚫 **{assistant}** - Blocked: {info.get('reason', '')}")
+        else:
+            st.info(f"❓ **{assistant}** - Status unknown")
+
+# ================ AUTO-ALLOCATION TOOL ================
+st.markdown("### 🤖 Auto-Allocate Assistants")
+
+with st.expander("🔄 Automatic Assistant Allocation", expanded=False):
+    st.caption("Automatically assign assistants based on department, doctor, and availability")
+    
+    col_doc, col_in, col_out = st.columns(3)
+    
+    with col_doc:
+        alloc_doctor = st.selectbox(
+            "Select Doctor",
+            options=[""] + ALL_DOCTORS,
+            key="alloc_doctor_select"
+        )
+    
+    with col_in:
+        alloc_in_time = st.time_input("Appointment Start", value=time(9, 0), key="alloc_in_time")
+    
+    with col_out:
+        alloc_out_time = st.time_input("Appointment End", value=time(10, 0), key="alloc_out_time")
+    
+    if alloc_doctor:
+        dept = get_department_for_doctor(alloc_doctor)
+        st.info(f"Department: **{dept}**")
+        
+        # Get available assistants
+        available = get_available_assistants(dept, alloc_in_time, alloc_out_time, df)
+        
+        st.markdown("**Assistant Availability:**")
+        for a in available:
+            if a["available"]:
+                st.success(f"✅ {a['name']} - Available")
+            else:
+                st.error(f"❌ {a['name']} - {a['reason']}")
+        
+        # Auto-allocate button
+        if st.button("🎯 Get Recommended Allocation", key="auto_alloc_btn"):
+            allocation = auto_allocate_assistants(alloc_doctor, alloc_in_time, alloc_out_time, df)
+            
+            if any(allocation.values()):
+                st.success("**Recommended Allocation:**")
+                if allocation["FIRST"]:
+                    st.write(f"• **FIRST**: {allocation['FIRST']}")
+                if allocation["SECOND"]:
+                    st.write(f"• **SECOND**: {allocation['SECOND']}")
+                if allocation["Third"]:
+                    st.write(f"• **Third**: {allocation['Third']}")
+            else:
+                st.warning("No available assistants found for this time slot in the department.")
+    else:
+        st.caption("Select a doctor to see department-specific assistant availability")
+
+# ================ ASSISTANT WORKLOAD SUMMARY ================
+st.markdown("### 📊 Assistant Workload Summary")
+
+# Count appointments per assistant
+assistant_workload = {}
+for assistant in ALL_ASSISTANTS:
+    schedule = get_assistant_schedule(assistant.upper(), df)
+    assistant_workload[assistant] = len(schedule)
+
+# Create workload dataframe
+workload_data = []
+for assistant, count in sorted(assistant_workload.items(), key=lambda x: x[1], reverse=True):
+    dept = get_department_for_assistant(assistant.upper())
+    workload_data.append({
+        "Assistant": assistant,
+        "Department": dept,
+        "Appointments Today": count
+    })
+
+if workload_data:
+    st.dataframe(pd.DataFrame(workload_data), use_container_width=True, hide_index=True)
