@@ -1399,8 +1399,8 @@ DEPARTMENTS = {
             "SECOND": {
                 "default": ["MUKHILA", "SHAKSHI", "ARCHANA", "ROHINI"]
             },
-            # THIRD: Rohini, Shakshi, Archana, Mukhila (if available)
-            "THIRD": {
+            # Third: Rohini, Shakshi, Archana, Mukhila (if available)
+            "Third": {
                 "default": ["ROHINI", "SHAKSHI", "ARCHANA", "MUKHILA"]
             },
         }
