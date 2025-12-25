@@ -719,11 +719,11 @@ with col_title:
     st.markdown("""
         <style>
         .header-container {
-            padding: 2rem 2.5rem;
-            background: linear-gradient(135deg, rgba(153, 88, 47, 0.12) 0%, rgba(201, 187, 176, 0.1) 100%);
-            border-radius: 12px;
-            border: 1px solid rgba(201, 187, 176, 0.3);
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+            padding: 1.5rem 0;
+            background: transparent;
+            border-radius: 0;
+            border: none;
+            box-shadow: none;
             text-align: center;
         }
         .dashboard-title {
@@ -771,9 +771,9 @@ st.markdown(f"""
         position: sticky;
         top: 0;
         z-index: 999;
-        background: var(--bg-primary);
-        padding: 0.75rem 0 0.5rem 0;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        background: linear-gradient(135deg, {COLORS['bg_primary']}00, {COLORS['bg_secondary']}00);
+        padding: 0.4rem 0 0.35rem 0;
+        box-shadow: none;
     }}
     .date-line {{
         font-size: 1rem;
