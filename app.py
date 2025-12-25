@@ -45,24 +45,7 @@ GSHEETS_AVAILABLE = _gsheets_available
 
 # To install required packages, run in your terminal:
 # pip install --upgrade pip
-# pip install pandas openpyxl streamlit streamlit-autorefresh gspread google-auth
-# pip install streamlit
-
-# Additional import for auto-refresh (optional)
-try:
-    from streamlit_autorefresh import st_autorefresh as _st_autorefresh  # pyright: ignore[reportMissingImports]
-
-    def st_autorefresh(interval: int = 60000, debounce: bool = True, key: str | None = None) -> int | None:
-        """Typed wrapper to satisfy pyright; returns the autorefresh counter."""
-        try:
-            return _st_autorefresh(interval=interval, debounce=debounce, key=key)
-        except Exception:
-            return None
-except Exception:
-    st.error("Missing package 'streamlit-autorefresh'. Install with: pip install -r requirements.txt")
-    # fallback no-op to avoid crashing if package is missing
-    def st_autorefresh(interval: int = 60000, debounce: bool = True, key: str | None = None) -> int | None:
-        return None
+# pip install pandas openpyxl streamlit gspread google-auth
 
 # Page config
 st.set_page_config(page_title="ALLOTMENT", layout="wide", initial_sidebar_state="collapsed")
@@ -2070,12 +2053,6 @@ def _render_assistant_cards(card_entries: list[dict[str, Any]]) -> None:
 with st.sidebar:
     st.markdown("## 🔔 Notifications")
     st.checkbox("Enable 15-minute reminders", value=True, key="enable_reminders")
-    st.checkbox(
-        "Pause auto-refresh while editing",
-        value=True,
-        key="pause_autorefresh_while_editing",
-        help="Keeps the table stable while you edit (recommended).",
-    )
     st.selectbox(
         "Default snooze (seconds)",
         options=[30, 60, 90, 120, 150, 180, 300],
@@ -3032,23 +3009,6 @@ def _data_editor_has_pending_edits(editor_key: str) -> bool:
     except Exception:
         return False
 
-
-def _should_pause_autorefresh_for_editing() -> bool:
-    keys: list[str] = ["full_schedule_editor", "doctor_editor"]
-    # OP editors are dynamic keys like op_OP_1_editor, etc.
-    for k in st.session_state.keys():
-        if isinstance(k, str) and k.startswith("op_") and k.endswith("_editor"):
-            keys.append(k)
-    return any(_data_editor_has_pending_edits(k) for k in keys)
-
-
-# Auto-refresh every 120 seconds (2 minutes) when idle.
-# Pause while editing so the table stays stable and doesn't interrupt typing.
-_pause_autorefresh = bool(st.session_state.get("pause_autorefresh_while_editing", True)) and _should_pause_autorefresh_for_editing()
-if _pause_autorefresh:
-    st.caption("⏸ Auto-refresh paused while editing")
-else:
-    st_autorefresh(interval=120000, debounce=True, key="autorefresh")
 
 # ================ Load Data ================
 df_raw = None
