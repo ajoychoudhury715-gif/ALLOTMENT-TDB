@@ -4644,10 +4644,15 @@ with dept_tabs[0]:
     }
     filter_options = list(status_label_map.keys())
     default_filter = [opt for opt in filter_options if opt != "UNKNOWN"]
+    
+    # Initialize session state for filter if not set
+    if "assistant_status_filter" not in st.session_state:
+        st.session_state.assistant_status_filter = default_filter
+    
     selected_statuses = st.multiselect(
         "Show statuses",
         options=filter_options,
-        default=default_filter,
+        default=None,  # Use session state instead
         format_func=lambda x: status_label_map.get(x, x.title()),
         key="assistant_status_filter",
     )
