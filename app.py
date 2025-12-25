@@ -919,6 +919,18 @@ DEPARTMENTS = {
 ALL_DOCTORS = _unique_preserve_order(DEPARTMENTS["PROSTO"]["doctors"] + DEPARTMENTS["ENDO"]["doctors"])
 ALL_ASSISTANTS = _unique_preserve_order(DEPARTMENTS["PROSTO"]["assistants"] + DEPARTMENTS["ENDO"]["assistants"])
 
+# ================ WEEKLY OFF CONFIGURATION ================
+# Format: {day_of_week: [assistants_off]} where 0=Monday, 1=Tuesday, etc.
+WEEKLY_OFF = {
+    0: ["RAJA"],                          # Monday
+    1: ["PRAMOTH", "ANYA"],              # Tuesday
+    2: ["ANSHIKA", "MUKHILA"],           # Wednesday
+    3: ["RESHMA", "LAVANYA"],            # Thursday
+    4: ["ROHINI"],                        # Friday
+    5: [],                                 # Saturday (no offs)
+    6: ["NITIN", "BABU"],                # Sunday
+}
+
 def get_department_for_doctor(doctor_name: str) -> str:
     """Get the department a doctor belongs to"""
     if not doctor_name:
@@ -1162,6 +1174,15 @@ def is_assistant_available(
         return False, "No assistant specified"
     
     assist_upper = str(assistant_name).strip().upper()
+    
+    # Check if today is the assistant's weekly off day
+    try:
+        today_weekday = now.weekday()  # 0=Monday, 6=Sunday
+        off_assistants = WEEKLY_OFF.get(today_weekday, [])
+        if any(str(a).strip().upper() == assist_upper for a in off_assistants):
+            return False, f"Weekly off on {now.strftime('%A')}"
+    except Exception:
+        pass
     
     # Convert check times to minutes
     check_in = _coerce_to_time_obj(check_in_time)
@@ -1474,6 +1495,24 @@ with st.sidebar:
         key="default_snooze_seconds",
     )
     st.write("💡 Reminders alert 15 minutes before a patient's In Time.")
+
+# ================ WEEKLY OFF DISPLAY ================
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("## 📋 Today's Assistants Off")
+    
+    today_weekday = now.weekday()  # 0=Monday, 6=Sunday
+    weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    today_name = weekday_names[today_weekday]
+    
+    today_off = WEEKLY_OFF.get(today_weekday, [])
+    
+    if today_off:
+        off_text = ", ".join(today_off)
+        st.warning(f"🔴 **{today_name}**: {off_text}")
+        st.caption("These assistants are off today and cannot be allocated.")
+    else:
+        st.success(f"✅ **{today_name}**: All assistants available")
 
 with st.sidebar:
     st.markdown("---")
