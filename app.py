@@ -847,6 +847,8 @@ DEPARTMENTS = {
             "DR.SHIFA",
         ]),
         "assistants": _unique_preserve_order([
+            "ARCHANA",
+            "SHAKSHI",
             "RAJA",
             "NITIN",
             "ANSHIKA",
@@ -854,6 +856,11 @@ DEPARTMENTS = {
             "PRAMOTH",
             "RESHMA",
         ]),
+        "allocation_rules": {
+            # Time-based allocation (in 24-hour format): {role: [(start_hour, assistant), ...]}
+            "FIRST": [(0, "RAJA"), (13, "ARCHANA"), (15.5, "SHAKSHI")],  # After 1pm = Archana, after 3:30pm = Shakshi
+            "SECOND": [(0, "NITIN"), (13, "ANSHIKA"), (15.5, "BABU")],
+        }
     },
     "ENDO": {
         "doctors": _unique_preserve_order([
@@ -867,12 +874,18 @@ DEPARTMENTS = {
         "assistants": _unique_preserve_order([
             "ANYA",
             "LAVANYA",
-            "ANSHIKA",  # shared
             "ROHINI",
             "MUKHILA",
-            "SHAKSHI",  # as provided
+            "SHAKSHI",
             "ARCHANA",
+            "ANSHIKA",  # shared
         ]),
+        "allocation_rules": {
+            # Time-based allocation: Primary preferences for FIRST, SECOND, THIRD by time
+            "FIRST": [(0, "ANYA"), (12, "LAVANYA"), (12, "ROHINI")],  # After 12pm, use Anya/Lavanya/Rohini
+            "SECOND": [(0, "MUKHILA"), (0, "SHAKSHI"), (0, "ARCHANA")],  # Mukhila, Shakshi, Archana
+            "THIRD": [(0, "ROHINI"), (0, "SHAKSHI"), (0, "ARCHANA"), (0, "MUKHILA")],  # If available
+        }
     },
 }
 
@@ -1241,7 +1254,7 @@ def auto_allocate_assistants(
 
 
 def _auto_fill_assistants_for_row(df_schedule: pd.DataFrame, row_index: int, only_fill_empty: bool = True) -> bool:
-    """Auto-fill FIRST/SECOND/Third for a single row. Returns True if anything changed."""
+    """Auto-fill FIRST/SECOND/Third for a single row based on time-based allocation rules. Returns True if anything changed."""
     try:
         if row_index < 0 or row_index >= len(df_schedule):
             return False
@@ -1275,24 +1288,50 @@ def _auto_fill_assistants_for_row(df_schedule: pd.DataFrame, row_index: int, onl
             if not _is_blank_cell(x)
         }
 
+        # Get appointment time in hours (decimal format for comparison)
+        in_time_obj = _coerce_to_time_obj(in_time_val)
+        appt_hour = in_time_obj.hour + in_time_obj.minute / 60.0 if in_time_obj else 0
+
         # Compute free assistants for this time window, excluding this same row.
         avail = get_available_assistants(department, in_time_val, out_time_val, df_schedule, exclude_row_id=row_id)
-        free = [a["name"] for a in avail if a.get("available")]
-        free = [a for a in free if a.strip().upper() not in already]
+        free_assistants = {a["name"].upper(): a["name"] for a in avail if a.get("available")}
 
         changed = False
+        
+        # Get allocation rules for this department
+        dept_config = DEPARTMENTS.get(department, {})
+        allocation_rules = dept_config.get("allocation_rules", {})
+
         roles = [("FIRST", current_first), ("SECOND", current_second), ("Third", current_third)]
-        pick_i = 0
         for role, current_val in roles:
             if only_fill_empty and (not _is_blank_cell(current_val)):
                 continue
-            if pick_i >= len(free):
-                break
-            if role in df_schedule.columns:
-                df_schedule.iloc[row_index, df_schedule.columns.get_loc(role)] = free[pick_i]
-            already.add(str(free[pick_i]).strip().upper())
-            pick_i += 1
-            changed = True
+            
+            # Get preferred assistants for this role/time from rules
+            preferred_assistants = []
+            if role in allocation_rules:
+                # allocation_rules[role] = [(start_hour, assistant_name), ...]
+                for start_hour, assistant_name in allocation_rules[role]:
+                    if appt_hour >= start_hour:
+                        if assistant_name.upper() not in already and assistant_name.upper() in free_assistants:
+                            preferred_assistants.append(free_assistants[assistant_name.upper()])
+
+            # If we have a preferred assistant from rules, use it
+            if preferred_assistants:
+                chosen = preferred_assistants[0]
+                if role in df_schedule.columns:
+                    df_schedule.iloc[row_index, df_schedule.columns.get_loc(role)] = chosen
+                already.add(chosen.upper())
+                changed = True
+            else:
+                # Fallback: use any free assistant not already assigned
+                for free_name in free_assistants.values():
+                    if free_name.upper() not in already:
+                        if role in df_schedule.columns:
+                            df_schedule.iloc[row_index, df_schedule.columns.get_loc(role)] = free_name
+                        already.add(free_name.upper())
+                        changed = True
+                        break
 
         return changed
     except Exception:
