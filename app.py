@@ -3328,6 +3328,36 @@ def highlight_row(row):
 
 all_sorted = df
 
+# ================ ASSISTANTS WEEKLY OFF DISPLAY (MAIN CONTENT) ================
+# Show a compact banner for today's weekly off assistants
+today_off_main = WEEKLY_OFF.get(now.weekday(), [])
+if today_off_main:
+    off_names = ", ".join(today_off_main)
+    st.markdown(
+        f"""
+        <div style="
+            background: linear-gradient(135deg, {COLORS['danger']}15, {COLORS['warning']}10);
+            border: 1px solid {COLORS['danger']}40;
+            border-left: 4px solid {COLORS['danger']};
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin: 10px 0 16px 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        ">
+            <span style="font-size: 1.4em;">🚫</span>
+            <div>
+                <strong style="color: {COLORS['text_primary']};">Weekly Off Today ({now.strftime('%A')})</strong>
+                <div style="color: {COLORS['text_secondary']}; margin-top: 2px;">
+                    <strong>{off_names}</strong> — Cannot be allocated today
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 # Manual save button and patient controls for schedule editor
 st.markdown("### 📋 Full Schedule")
 
