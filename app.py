@@ -3852,8 +3852,8 @@ with col_add:
         # Append to the original dataframe
         new_row_df = pd.DataFrame([new_row])
         df_raw_with_new = pd.concat([df_raw, new_row_df], ignore_index=True)
-        # Save or queue depending on auto-save mode
-        _maybe_save(df_raw_with_new, message="New patient row added!")
+        # Always save immediately when adding a new patient
+        save_data(df_raw_with_new, message="New patient row added!")
         st.rerun()
 
 with col_save:
