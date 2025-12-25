@@ -1,6 +1,7 @@
 import streamlit as st  # pyright: ignore[reportUndefinedVariable]
 import pandas as pd # pyright: ignore[reportMissingModuleSource]
-from datetime import datetime, time, timezone, timedelta
+from datetime import datetime, time as time_type, timezone, timedelta
+from typing import Any
 import os
 import time as time_module  # for retry delays
 import zipfile  # for BadZipFile exception handling
@@ -21,19 +22,25 @@ except Exception:
     pass
 
 # Supabase integration (Postgres) for persistent cloud storage (no Google)
+_supabase_available = False
 try:
     from supabase import create_client  # type: ignore
-    SUPABASE_AVAILABLE = True
+    _supabase_available = True
 except Exception:
-    SUPABASE_AVAILABLE = False
+    pass
+
+SUPABASE_AVAILABLE = _supabase_available
 
 # Google Sheets integration for persistent cloud storage
+_gsheets_available = False
 try:
     import gspread
     from google.oauth2.service_account import Credentials
-    GSHEETS_AVAILABLE = True
+    _gsheets_available = True
 except ImportError:
-    GSHEETS_AVAILABLE = False
+    pass
+
+GSHEETS_AVAILABLE = _gsheets_available
 
 # To install required packages, run in your terminal:
 # pip install --upgrade pip
@@ -46,7 +53,7 @@ try:
 except Exception:
     st.error("Missing package 'streamlit-autorefresh'. Install with: pip install -r requirements.txt")
     # fallback no-op to avoid crashing if package is missing
-    def st_autorefresh(interval=60000, debounce=True, key=None):
+    def st_autorefresh(interval: int = 60000, debounce: bool = True, key: str | None = None) -> None:
         return None
 
 # Page config
@@ -99,7 +106,7 @@ COLORS = DARK_COLORS if bool(st.session_state.get("dark_mode")) else LIGHT_COLOR
 
 # ================ WEEKLY OFF CONFIGURATION ================
 # Format: {day_of_week: [assistants_off]} where 0=Monday, 1=Tuesday, etc.
-WEEKLY_OFF = {
+WEEKLY_OFF: dict[int, list[str]] = {
     0: ["RAJA"],                          # Monday
     1: ["PRAMOTH", "ANYA"],              # Tuesday
     2: ["ANSHIKA", "MUKHILA"],           # Wednesday
@@ -1138,7 +1145,140 @@ def _get_app_version_short() -> str:
 
 
 # Epoch seconds (used for 30-second snooze timing)
-now_epoch = int(time_module.time())
+now_epoch = int(time_module.time_type())
+
+# ================ TIME UTILITY FUNCTIONS ================
+# Define time conversion functions early so they can be used throughout the code
+
+def _coerce_to_time_obj(time_value: Any) -> time_type | None:
+    """Best-effort coercion of many time representations into a datetime.time.
+
+    Supports:
+    - datetime.time, datetime
+    - strings: HH:MM, HH:MM:SS, HH.MM, and 12-hour formats like '09:30 AM'
+    - numbers: 9.30 (meaning 09:30), or Excel serial time 0-1
+    """
+    if time_value is None or pd.isna(time_value) or time_value == "":
+        return None
+    if isinstance(time_value, time_type):
+        return time_type(time_value.hour, time_value.minute)
+    if isinstance(time_value, time_type):
+        return time_type(time_value.hour, time_value.minute)
+
+    # Strings
+    if isinstance(time_value, str):
+        s = " ".join(time_value.strip().split())
+        if s == "" or s.upper() in {"N/A", "NAT", "NONE"}:
+            return None
+
+        # 12-hour formats (e.g., 09:30 AM, 9:30PM, 09:30:00 PM)
+        if re.search(r"\b(AM|PM)\b", s, flags=re.IGNORECASE) or re.search(r"(AM|PM)$", s, flags=re.IGNORECASE):
+            s_norm = re.sub(r"\s*(AM|PM)\s*$", r" \1", s, flags=re.IGNORECASE).upper()
+            for fmt in ("%I:%M %p", "%I:%M:%S %p"):
+                try:
+                    dt = datetime.strptime(s_norm, fmt)
+                    return time_type(dt.hour, dt.minute)
+                except ValueError:
+                    pass
+
+        # HH:MM or HH:MM:SS
+        if ":" in s:
+            parts = s.split(":")
+            if len(parts) >= 2:
+                try:
+                    h = int(parts[0])
+                    m_part = re.sub(r"\D.*$", "", parts[1])
+                    m = int(m_part)
+                    if 0 <= h < 24 and 0 <= m < 60:
+                        return time_type(h, m)
+                except (ValueError, TypeError):
+                    pass
+
+        # HH.MM
+        if "." in s:
+            parts = s.split(".")
+            if len(parts) == 2:
+                try:
+                    h = int(parts[0])
+                    m = int(parts[1])
+                    if 0 <= h < 24 and 0 <= m < 60:
+                        return time_type(h, m)
+                except (ValueError, TypeError):
+                    pass
+
+        return None
+
+    # Numeric formats
+    try:
+        num_val = float(time_value)
+    except (ValueError, TypeError):
+        return None
+
+    # Excel serial time format (0.625 = 15:00)
+    if 0 <= num_val <= 1:
+        total_minutes = round(num_val * 1440)
+        hours = (total_minutes // 60) % 24
+        minutes = total_minutes % 60
+        return time_type(hours, minutes)
+
+    # 9.30 meaning 09:30 (decimal part is minutes directly)
+    if 0 <= num_val < 24:
+        hours = int(num_val)
+        decimal_part = num_val - hours
+        minutes = round(decimal_part * 100)
+        if minutes > 59:
+            minutes = round(decimal_part * 60)
+        if minutes >= 60:
+            hours = (hours + 1) % 24
+            minutes = 0
+        if 0 <= hours < 24 and 0 <= minutes < 60:
+            return time_type(hours, minutes)
+
+    return None
+
+def dec_to_time(time_value: Any) -> str:
+    """Convert various time formats to HH:MM string"""
+    t = _coerce_to_time_obj(time_value)
+    if t is None:
+        return "N/A"
+    return f"{t.hour:02d}:{t.minute:02d}"
+
+def safe_str_to_time_obj(time_str: Any) -> time_type | None:
+    """Convert time string to time object safely"""
+    return _coerce_to_time_obj(time_str)
+
+def time_obj_to_str(t: Any) -> str:
+    """Convert time object to 24-hour HH:MM string for Excel"""
+    if pd.isna(t) or t is None:
+        return "N/A"
+    try:
+        if isinstance(t, time_type):
+            return f"{t.hour:02d}:{t.minute:02d}"
+        elif isinstance(t, str):
+            return t
+    except (ValueError, AttributeError):
+        pass
+    return "N/A"
+
+def time_obj_to_str_12hr(t: Any) -> str:
+    """Convert time object to 12-hour format with AM/PM"""
+    if pd.isna(t) or t is None:
+        return "N/A"
+    try:
+        if isinstance(t, time_type):
+            return t.strftime("%I:%M %p")
+        elif isinstance(t, str):
+            return t
+    except (ValueError, AttributeError):
+        pass
+    return "N/A"
+
+def time_to_minutes(time_value: Any) -> int | None:
+    """Convert time values to minutes since midnight for comparison"""
+    t = _coerce_to_time_obj(time_value)
+    if t is None:
+        return pd.NA
+    return t.hour * 60 + t.minute
 
 # ================ DEPARTMENT & STAFF CONFIGURATION ================
 # Departments with their doctors and assistants
@@ -1164,7 +1304,7 @@ def _norm_staff_key(value: str) -> str:
         return ""
 
 
-def _is_blank_cell(value) -> bool:
+def _is_blank_cell(value: Any) -> bool:
     """True if value is empty/NaN/'nan'/'none'."""
     try:
         if value is None or pd.isna(value):
@@ -1271,7 +1411,7 @@ def get_department_for_doctor(doctor_name: str) -> str:
                 return dept
     return ""
 
-def get_assistants_for_department(department: str) -> list:
+def get_assistants_for_department(department: str) -> list[str]:
     """Get list of assistants for a specific department"""
     dept_upper = str(department).strip().upper()
     if dept_upper in DEPARTMENTS:
@@ -1300,7 +1440,7 @@ def get_department_for_assistant(assistant_name: str) -> str:
 if "time_blocks" not in st.session_state:
     st.session_state.time_blocks = []  # List of {assistant, start_time, end_time, reason, date}
 
-def add_time_block(assistant: str, start_time: time, end_time: time, reason: str = "Backend Work"):
+def add_time_block(assistant: str, start_time: Any, end_time: Any, reason: str = "Backend Work") -> None:
     """Add a time block for an assistant"""
     today_str = now.strftime("%Y-%m-%d")
     block = {
@@ -1320,7 +1460,7 @@ def remove_time_block(index: int):
         return True
     return False
 
-def is_assistant_blocked(assistant: str, check_time: time) -> tuple[bool, str]:
+def is_assistant_blocked(assistant: str, check_time: Any) -> tuple[bool, str]:
     """Check if an assistant is blocked at a specific time. Returns (is_blocked, reason)"""
     if not assistant or not check_time:
         return False, ""
@@ -1344,7 +1484,7 @@ def is_assistant_blocked(assistant: str, check_time: time) -> tuple[bool, str]:
     return False, ""
 
 
-def _time_to_hhmm(t: time | None) -> str:
+def _time_to_hhmm(t: time_type | None) -> str:
     if t is None:
         return ""
     return f"{t.hour:02d}:{t.minute:02d}"
@@ -1451,7 +1591,7 @@ def _apply_time_blocks_to_meta(meta: dict) -> dict:
     return out
 
 # ================ ASSISTANT AVAILABILITY TRACKING ================
-def get_assistant_schedule(assistant_name: str, df_schedule: pd.DataFrame) -> list:
+def get_assistant_schedule(assistant_name: str, df_schedule: pd.DataFrame) -> list[dict[str, any]]:
     """Get all appointments where this assistant is assigned"""
     if not assistant_name or df_schedule.empty:
         return []
@@ -1571,11 +1711,11 @@ def is_assistant_available(
 
 def get_available_assistants(
     department: str,
-    check_in_time,
-    check_out_time,
+    check_in_time: Any,
+    check_out_time: Any,
     df_schedule: pd.DataFrame,
     exclude_row_id: str | None = None,
-) -> list:
+) -> list[dict[str, any]]:
     """
     Get list of available assistants for a department at a specific time.
     Returns list of dicts with assistant name and availability status.
@@ -1595,11 +1735,11 @@ def get_available_assistants(
 
 def auto_allocate_assistants(
     doctor: str,
-    in_time,
-    out_time,
+    in_time: Any,
+    out_time: Any,
     df_schedule: pd.DataFrame,
     exclude_row_id: str | None = None,
-) -> dict:
+) -> dict[str, str]:
     """
     Automatically allocate assistants based on department and availability.
     Returns dict with FIRST, SECOND, Third assignments.
@@ -1742,13 +1882,13 @@ def _auto_fill_assistants_for_row(df_schedule: pd.DataFrame, row_index: int, onl
     except Exception:
         return False
 
-def get_current_assistant_status(df_schedule: pd.DataFrame) -> dict:
+def get_current_assistant_status(df_schedule: pd.DataFrame) -> dict[str, dict[str, str]]:
     """
     Get real-time status of all assistants.
     Returns dict with assistant name -> status info
     """
     status = {}
-    current_time = time(now.hour, now.minute)
+    current_time = time_type(now.hour, now.minute)
     current_min = now.hour * 60 + now.minute
     today_weekday = now.weekday()
     weekday_name_list = globals().get("weekday_names", [])
@@ -1856,7 +1996,7 @@ def _render_availability_summary(total: int, free: int, busy: int, blocked: int)
     st.markdown("\n".join(html_parts), unsafe_allow_html=True)
 
 
-def _render_assistant_cards(card_entries: list[dict]) -> None:
+def _render_assistant_cards(card_entries: list[dict[str, any]]) -> None:
     if not card_entries:
         st.info("No assistants match the selected filters.")
         return
@@ -2011,7 +2151,7 @@ if (not USE_SUPABASE) and (not USE_GOOGLE_SHEETS):
             USE_GOOGLE_SHEETS = True
 
 
-def _normalize_service_account_info(raw_info: dict) -> dict:
+def _normalize_service_account_info(raw_info: dict[str, any]) -> dict[str, any]:
     """Normalize Streamlit secrets into a dict suitable for google-auth.
 
     Streamlit secrets are often pasted with either literal "\n" sequences or
@@ -2067,7 +2207,7 @@ def _normalize_service_account_info(raw_info: dict) -> dict:
     return info
 
 
-def _get_service_account_info_from_secrets(secrets_obj) -> dict:
+def _get_service_account_info_from_secrets(secrets_obj: Any) -> dict[str, any]:
     """Support multiple Streamlit secrets shapes.
 
     Supported:
@@ -3023,132 +3163,6 @@ df = df_raw.copy()
 df["In Time"] = df["In Time"]
 df["Out Time"] = df["Out Time"]
 
-
-# Convert various time formats to HH:MM string
-def dec_to_time(time_value):
-    t = _coerce_to_time_obj(time_value)
-    if t is None:
-        return "N/A"
-    return f"{t.hour:02d}:{t.minute:02d}"
-
-
-def _coerce_to_time_obj(time_value):
-    """Best-effort coercion of many time representations into a datetime.time.
-
-    Supports:
-    - datetime.time, datetime
-    - strings: HH:MM, HH:MM:SS, HH.MM, and 12-hour formats like '09:30 AM'
-    - numbers: 9.30 (meaning 09:30), or Excel serial time 0-1
-    """
-    if time_value is None or pd.isna(time_value) or time_value == "":
-        return None
-    if isinstance(time_value, time):
-        return time(time_value.hour, time_value.minute)
-    if isinstance(time_value, datetime):
-        return time(time_value.hour, time_value.minute)
-
-    # Strings
-    if isinstance(time_value, str):
-        s = " ".join(time_value.strip().split())
-        if s == "" or s.upper() in {"N/A", "NAT", "NONE"}:
-            return None
-
-        # 12-hour formats (e.g., 09:30 AM, 9:30PM, 09:30:00 PM)
-        if re.search(r"\b(AM|PM)\b", s, flags=re.IGNORECASE) or re.search(r"(AM|PM)$", s, flags=re.IGNORECASE):
-            s_norm = re.sub(r"\s*(AM|PM)\s*$", r" \1", s, flags=re.IGNORECASE).upper()
-            for fmt in ("%I:%M %p", "%I:%M:%S %p"):
-                try:
-                    dt = datetime.strptime(s_norm, fmt)
-                    return time(dt.hour, dt.minute)
-                except ValueError:
-                    pass
-
-        # HH:MM or HH:MM:SS
-        if ":" in s:
-            parts = s.split(":")
-            if len(parts) >= 2:
-                try:
-                    h = int(parts[0])
-                    m_part = re.sub(r"\D.*$", "", parts[1])
-                    m = int(m_part)
-                    if 0 <= h < 24 and 0 <= m < 60:
-                        return time(h, m)
-                except (ValueError, TypeError):
-                    pass
-
-        # HH.MM
-        if "." in s:
-            parts = s.split(".")
-            if len(parts) == 2:
-                try:
-                    h = int(parts[0])
-                    m = int(parts[1])
-                    if 0 <= h < 24 and 0 <= m < 60:
-                        return time(h, m)
-                except (ValueError, TypeError):
-                    pass
-
-        return None
-
-    # Numeric formats
-    try:
-        num_val = float(time_value)
-    except (ValueError, TypeError):
-        return None
-
-    # Excel serial time format (0.625 = 15:00)
-    if 0 <= num_val <= 1:
-        total_minutes = round(num_val * 1440)
-        hours = (total_minutes // 60) % 24
-        minutes = total_minutes % 60
-        return time(hours, minutes)
-
-    # 9.30 meaning 09:30 (decimal part is minutes directly)
-    if 0 <= num_val < 24:
-        hours = int(num_val)
-        decimal_part = num_val - hours
-        minutes = round(decimal_part * 100)
-        if minutes > 59:
-            minutes = round(decimal_part * 60)
-        if minutes >= 60:
-            hours = (hours + 1) % 24
-            minutes = 0
-        if 0 <= hours < 24 and 0 <= minutes < 60:
-            return time(hours, minutes)
-
-    return None
-
-# Define all time conversion functions first
-def safe_str_to_time_obj(time_str):
-    """Convert time string to time object safely"""
-    return _coerce_to_time_obj(time_str)
-
-def time_obj_to_str(t):
-    """Convert time object to 24-hour HH:MM string for Excel"""
-    if pd.isna(t) or t is None:
-        return "N/A"
-    try:
-        if isinstance(t, time):
-            return f"{t.hour:02d}:{t.minute:02d}"
-        elif isinstance(t, str):
-            return t
-    except (ValueError, AttributeError):
-        pass
-    return "N/A"
-
-def time_obj_to_str_12hr(t):
-    """Convert time object to 12-hour format with AM/PM"""
-    if pd.isna(t) or t is None:
-        return "N/A"
-    try:
-        if isinstance(t, time):
-            return t.strftime("%I:%M %p")
-        elif isinstance(t, str):
-            return t
-    except (ValueError, AttributeError):
-        pass
-    return "N/A"
-
 df["In Time Str"] = df["In Time"].apply(dec_to_time)
 df["Out Time Str"] = df["Out Time"].apply(dec_to_time)
 
@@ -3157,7 +3171,7 @@ df["In Time Obj"] = df["In Time Str"].apply(safe_str_to_time_obj)
 df["Out Time Obj"] = df["Out Time Str"].apply(safe_str_to_time_obj)
 
 # Convert checkbox columns (SUCTION, CLEANING) - checkmark or content to boolean
-def str_to_checkbox(val):
+def str_to_checkbox(val: Any) -> bool:
     """Convert string values to boolean for checkboxes"""
     # Preserve actual booleans
     if isinstance(val, bool):
@@ -3194,14 +3208,7 @@ if "SUCTION" in df.columns:
 if "CLEANING" in df.columns:
     df["CLEANING"] = df["CLEANING"].apply(str_to_checkbox)
 
-
-# Convert time values to minutes since midnight for comparison
-def time_to_minutes(time_value):
-    t = _coerce_to_time_obj(time_value)
-    if t is None:
-        return pd.NA
-    return t.hour * 60 + t.minute
-
+# Convert time values to minutes since midnight for comparison (function defined earlier)
 df["In_min"] = df["In Time"].apply(time_to_minutes).astype('Int64')
 df["Out_min"] = df["Out Time"].apply(time_to_minutes).astype('Int64')
 
@@ -3357,9 +3364,9 @@ with st.sidebar:
 
         col_start, col_end = st.columns(2)
         with col_start:
-            block_start = st.time_input("Start Time", value=time(9, 0), key="block_start_time")
+            block_start = st.time_input("Start Time", value=time_type(9, 0), key="block_start_time")
         with col_end:
-            block_end = st.time_input("End Time", value=time(10, 0), key="block_end_time")
+            block_end = st.time_input("End Time", value=time_type(10, 0), key="block_end_time")
 
         block_reason = st.text_input(
             "Reason",
@@ -3521,7 +3528,7 @@ for idx, row in df_raw.iterrows():
                         val = int(until_raw)
                         # Legacy values were stored as minutes since midnight (small numbers)
                         if val < 100000:
-                            midnight_ist = datetime(now.year, now.month, now.day, tzinfo=IST)
+                            midnight_ist = datetime_type(now.year, now.month, now.day, tzinfo=IST)
                             until_epoch = int(midnight_ist.timestamp()) + (val * 60)
                         else:
                             until_epoch = val
@@ -4017,8 +4024,8 @@ for col in ["Patient Name", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CAS
         display_all[col] = display_all[col].astype(str).replace('nan', '')
 
 # Keep In Time and Out Time as time objects for proper display
-display_all["In Time"] = display_all["In Time"].apply(lambda v: v if isinstance(v, time) else None)
-display_all["Out Time"] = display_all["Out Time"].apply(lambda v: v if isinstance(v, time) else None)
+display_all["In Time"] = display_all["In Time"].apply(lambda v: v if isinstance(time_value, time_type) else None)
+display_all["Out Time"] = display_all["Out Time"].apply(lambda v: v if isinstance(time_value, time_type) else None)
 
 # Computed overtime indicator (uses scheduled Out Time vs current time)
 def _compute_overtime_min(_row) -> int | None:
@@ -4290,8 +4297,8 @@ if unique_ops:
             display_op["_orig_idx"] = display_op.index
             display_op = display_op.reset_index(drop=True)
             # Ensure time objects are preserved; Streamlit TimeColumn edits best with None for missing
-            display_op["In Time"] = display_op["In Time"].apply(lambda v: v if isinstance(v, time) else None)
-            display_op["Out Time"] = display_op["Out Time"].apply(lambda v: v if isinstance(v, time) else None)
+            display_op["In Time"] = display_op["In Time"].apply(lambda v: v if isinstance(time_value, time_type) else None)
+            display_op["Out Time"] = display_op["Out Time"].apply(lambda v: v if isinstance(time_value, time_type) else None)
 
             display_op["Overtime (min)"] = op_df.apply(_compute_overtime_min, axis=1)
             
@@ -4627,10 +4634,10 @@ with st.expander("🔄 Automatic Assistant Allocation", expanded=False):
         )
     
     with col_in:
-        alloc_in_time = st.time_input("Appointment Start", value=time(9, 0), key="alloc_in_time")
+        alloc_in_time = st.time_input("Appointment Start", value=time_type(9, 0), key="alloc_in_time")
     
     with col_out:
-        alloc_out_time = st.time_input("Appointment End", value=time(10, 0), key="alloc_out_time")
+        alloc_out_time = st.time_input("Appointment End", value=time_type(10, 0), key="alloc_out_time")
     
     if alloc_doctor:
         dept = get_department_for_doctor(alloc_doctor)
