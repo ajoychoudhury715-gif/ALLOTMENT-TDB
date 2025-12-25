@@ -889,13 +889,22 @@ DEPARTMENTS = {
             "ANSHIKA",  # shared
         ]),
         "allocation_rules": {
-            # Time-based allocation: Primary preferences for FIRST, SECOND, THIRD by time
-            # FIRST: Anya after 12pm, then Lavanya, Rohini
-            "FIRST": [(0, "LAVANYA"), (0, "ROHINI"), (12, "ANYA")],
+            # Doctor-specific and time-based allocation for ENDO
+            "FIRST": {
+                # DR. NIMAI: Archana, Reshma, Mukhila, Rohini
+                "DR.NIMAI": ["ARCHANA", "RESHMA", "MUKHILA", "ROHINI", "ANYA", "LAVANYA"],
+                # Default: Anya after 12pm, then Lavanya, Rohini
+                "default": ["LAVANYA", "ROHINI", "ANYA"],
+                "time_override": [(12, "ANYA")]
+            },
             # SECOND: Mukhila, Shakshi, Archana, Rohini
-            "SECOND": [(0, "MUKHILA"), (0, "SHAKSHI"), (0, "ARCHANA"), (0, "ROHINI")],
+            "SECOND": {
+                "default": ["MUKHILA", "SHAKSHI", "ARCHANA", "ROHINI"]
+            },
             # THIRD: Rohini, Shakshi, Archana, Mukhila (if available)
-            "THIRD": [(0, "ROHINI"), (0, "SHAKSHI"), (0, "ARCHANA"), (0, "MUKHILA")],
+            "THIRD": {
+                "default": ["ROHINI", "SHAKSHI", "ARCHANA", "MUKHILA"]
+            },
         }
     },
 }
@@ -1336,10 +1345,16 @@ def _auto_fill_assistants_for_row(df_schedule: pd.DataFrame, row_index: int, onl
                 
                 # Check for time overrides (for FIRST role)
                 if not preferred_assistants and role == "FIRST" and "time_override" in rule:
-                    for start_hour, assistant_name in rule["time_override"]:
-                        if appt_hour >= start_hour:
-                            if assistant_name.upper() not in already and assistant_name.upper() in free_assistants:
-                                preferred_assistants.append(free_assistants[assistant_name.upper()])
+                    time_overrides = rule["time_override"]
+                    # Handle both list of tuples and single tuple formats
+                    if isinstance(time_overrides, list):
+                        for item in time_overrides:
+                            if isinstance(item, tuple):
+                                start_hour, assistant_name = item
+                                if appt_hour >= start_hour:
+                                    if assistant_name.upper() not in already and assistant_name.upper() in free_assistants:
+                                        preferred_assistants.append(free_assistants[assistant_name.upper()])
+
                 
                 # If no conditional/override matched, use doctor-specific or default rules
                 if not preferred_assistants:
