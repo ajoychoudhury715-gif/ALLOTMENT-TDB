@@ -96,6 +96,18 @@ with st.sidebar:
 
 COLORS = DARK_COLORS if bool(st.session_state.get("dark_mode")) else LIGHT_COLORS
 
+# ================ WEEKLY OFF CONFIGURATION ================
+# Format: {day_of_week: [assistants_off]} where 0=Monday, 1=Tuesday, etc.
+WEEKLY_OFF = {
+    0: ["RAJA"],                          # Monday
+    1: ["PRAMOTH", "ANYA"],              # Tuesday
+    2: ["ANSHIKA", "MUKHILA"],           # Wednesday
+    3: ["RESHMA", "LAVANYA"],            # Thursday
+    4: ["ROHINI"],                        # Friday
+    5: [],                                 # Saturday (no offs)
+    6: ["NITIN", "BABU"],                # Sunday
+}
+
 # Custom CSS with customizable colors
 st.markdown(
     f"""
@@ -759,6 +771,58 @@ IST = timezone(timedelta(hours=5, minutes=30))
 now = datetime.now(IST)
 st.markdown(f" {now.strftime('%B %d, %Y - %I:%M:%S %p')} IST")
 
+# Assistants Weekly Off display (10mm below date)
+st.markdown("<div style='margin-top:10mm;'></div>", unsafe_allow_html=True)
+
+weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+today_idx = now.weekday()
+tomorrow_idx = (today_idx + 1) % 7
+
+def _render_off_card(title: str, off_list: list[str]):
+    has_off = bool(off_list)
+    names = ", ".join(off_list) if has_off else "All assistants available"
+    icon = "🚫" if has_off else "✅"
+    bg = COLORS['danger'] if has_off else COLORS['success']
+    border = COLORS['danger'] if has_off else COLORS['success']
+    note = "Cannot be allocated" if has_off else "No weekly off"
+    st.markdown(
+        f"""
+        <div style="
+            background: linear-gradient(135deg, {bg}15, {COLORS['accent']}10);
+            border: 1px solid {border}40;
+            border-left: 4px solid {border};
+            border-radius: 8px;
+            padding: 12px 14px;
+            margin: 6px 0 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        ">
+            <span style="font-size: 1.3em;">{icon}</span>
+            <div>
+                <strong style="color: {COLORS['text_primary']};">{title}</strong>
+                <div style="color: {COLORS['text_secondary']}; margin-top: 2px;">
+                    <strong>{names}</strong> — {note}
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+st.markdown("### 🗓️ Assistants Weekly Off")
+col_today, col_tomorrow = st.columns(2)
+with col_today:
+    _render_off_card(
+        f"Today ({weekday_names[today_idx]})",
+        WEEKLY_OFF.get(today_idx, []),
+    )
+with col_tomorrow:
+    _render_off_card(
+        f"Tomorrow ({weekday_names[tomorrow_idx]})",
+        WEEKLY_OFF.get(tomorrow_idx, []),
+    )
+
 
 def _get_app_version_short() -> str:
     """Best-effort git/version identifier for display.
@@ -798,8 +862,6 @@ def _get_app_version_short() -> str:
 
     return "unknown"
 
-
-st.caption(f"Version: {_get_app_version_short()}")
 
 # Epoch seconds (used for 30-second snooze timing)
 now_epoch = int(time_module.time())
@@ -918,18 +980,6 @@ DEPARTMENTS = {
 # Combined lists for dropdowns
 ALL_DOCTORS = _unique_preserve_order(DEPARTMENTS["PROSTO"]["doctors"] + DEPARTMENTS["ENDO"]["doctors"])
 ALL_ASSISTANTS = _unique_preserve_order(DEPARTMENTS["PROSTO"]["assistants"] + DEPARTMENTS["ENDO"]["assistants"])
-
-# ================ WEEKLY OFF CONFIGURATION ================
-# Format: {day_of_week: [assistants_off]} where 0=Monday, 1=Tuesday, etc.
-WEEKLY_OFF = {
-    0: ["RAJA"],                          # Monday
-    1: ["PRAMOTH", "ANYA"],              # Tuesday
-    2: ["ANSHIKA", "MUKHILA"],           # Wednesday
-    3: ["RESHMA", "LAVANYA"],            # Thursday
-    4: ["ROHINI"],                        # Friday
-    5: [],                                 # Saturday (no offs)
-    6: ["NITIN", "BABU"],                # Sunday
-}
 
 def get_department_for_doctor(doctor_name: str) -> str:
     """Get the department a doctor belongs to"""
@@ -2541,58 +2591,6 @@ if "meta" not in df_raw.attrs:
 
 # Load persisted time blocks (if present) from storage metadata
 _sync_time_blocks_from_meta(df_raw)
-
-# ================ ASSISTANTS WEEKLY OFF DISPLAY (MAIN CONTENT) ================
-weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-today_idx = now.weekday()
-tomorrow_idx = (today_idx + 1) % 7
-
-def _render_off_card(title: str, off_list: list[str], is_today: bool):
-    has_off = bool(off_list)
-    names = ", ".join(off_list) if has_off else "All assistants available"
-    icon = "🚫" if has_off else "✅"
-    bg = COLORS['danger'] if has_off else COLORS['success']
-    border = COLORS['danger'] if has_off else COLORS['success']
-    note = "Cannot be allocated" if has_off else "No weekly off today"
-    st.markdown(
-        f"""
-        <div style="
-            background: linear-gradient(135deg, {bg}15, {COLORS['accent']}10);
-            border: 1px solid {border}40;
-            border-left: 4px solid {border};
-            border-radius: 8px;
-            padding: 12px 14px;
-            margin: 8px 0 12px 0;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        ">
-            <span style="font-size: 1.3em;">{icon}</span>
-            <div>
-                <strong style="color: {COLORS['text_primary']};">{title}</strong>
-                <div style="color: {COLORS['text_secondary']}; margin-top: 2px;">
-                    <strong>{names}</strong> — {note}
-                </div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-st.markdown("### 🗓️ Assistants Weekly Off")
-col_today, col_tomorrow = st.columns(2)
-with col_today:
-    _render_off_card(
-        f"Today ({weekday_names[today_idx]})",
-        WEEKLY_OFF.get(today_idx, []),
-        True,
-    )
-with col_tomorrow:
-    _render_off_card(
-        f"Tomorrow ({weekday_names[tomorrow_idx]})",
-        WEEKLY_OFF.get(tomorrow_idx, []),
-        False,
-    )
 
 # Ensure expected columns exist (backfills older data/backends)
 for _col in _get_expected_columns():
