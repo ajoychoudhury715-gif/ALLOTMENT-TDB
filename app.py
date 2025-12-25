@@ -857,10 +857,19 @@ DEPARTMENTS = {
             "RESHMA",
         ]),
         "allocation_rules": {
-            # Time-based allocation (in 24-hour format): {role: [(start_hour, assistant), ...]}
-            # FIRST: Archana after 1pm, Shakshi after 3:30pm
-            "FIRST": [(0, "RAJA"), (13, "ARCHANA"), (15.5, "SHAKSHI")],
-            "SECOND": [(0, "NITIN"), (0, "ANSHIKA"), (0, "BABU")],
+            # Doctor-specific and time-based allocation rules
+            # Format: {role: {doctor: [assistants in order], "default": [assistants in order]}}
+            "FIRST": {
+                "DR.HUSSAIN": ["RAJA", "NITIN", "ANSHIKA", "RESHMA", "PRAMOTH", "BABU"],
+                "DR.HUSAIN": ["RAJA", "NITIN", "ANSHIKA", "RESHMA", "PRAMOTH", "BABU"],
+                "DR.SHIFA": ["RESHMA", "PRAMOTH", "ANSHIKA", "RAJA", "NITIN", "BABU"],
+                "default": ["ANSHIKA", "RAJA", "NITIN", "RESHMA", "PRAMOTH", "BABU"],
+                # Time overrides: if after this hour, use this assistant for FIRST
+                "time_override": [(13, "ARCHANA"), (15.5, "SHAKSHI")]
+            },
+            "SECOND": {
+                "default": ["NITIN", "ANSHIKA", "BABU", "RAJA", "RESHMA", "PRAMOTH"]
+            },
         }
     },
     "ENDO": {
@@ -1258,7 +1267,7 @@ def auto_allocate_assistants(
 
 
 def _auto_fill_assistants_for_row(df_schedule: pd.DataFrame, row_index: int, only_fill_empty: bool = True) -> bool:
-    """Auto-fill FIRST/SECOND/Third for a single row based on time-based allocation rules. Returns True if anything changed."""
+    """Auto-fill FIRST/SECOND/Third for a single row based on doctor-specific and time-based allocation rules. Returns True if anything changed."""
     try:
         if row_index < 0 or row_index >= len(df_schedule):
             return False
@@ -1311,16 +1320,27 @@ def _auto_fill_assistants_for_row(df_schedule: pd.DataFrame, row_index: int, onl
             if only_fill_empty and (not _is_blank_cell(current_val)):
                 continue
             
-            # Get preferred assistants for this role/time from rules
+            # Get preferred assistants for this role based on doctor and time
             preferred_assistants = []
+            
             if role in allocation_rules:
-                # allocation_rules[role] = [(start_hour, assistant_name), ...]
-                for start_hour, assistant_name in allocation_rules[role]:
-                    if appt_hour >= start_hour:
+                rule = allocation_rules[role]
+                
+                # Check for time overrides first (for FIRST role)
+                if role == "FIRST" and "time_override" in rule:
+                    for start_hour, assistant_name in rule["time_override"]:
+                        if appt_hour >= start_hour:
+                            if assistant_name.upper() not in already and assistant_name.upper() in free_assistants:
+                                preferred_assistants.append(free_assistants[assistant_name.upper()])
+                
+                # If no time override matched, use doctor-specific rules
+                if not preferred_assistants:
+                    doctor_assistant_list = rule.get(doctor, rule.get("default", []))
+                    for assistant_name in doctor_assistant_list:
                         if assistant_name.upper() not in already and assistant_name.upper() in free_assistants:
                             preferred_assistants.append(free_assistants[assistant_name.upper()])
 
-            # If we have a preferred assistant from rules, use it
+            # If we have preferred assistants from rules, use the first available
             if preferred_assistants:
                 chosen = preferred_assistants[0]
                 if role in df_schedule.columns:
