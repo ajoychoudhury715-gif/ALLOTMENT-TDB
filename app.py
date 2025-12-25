@@ -1145,7 +1145,7 @@ def _get_app_version_short() -> str:
 
 
 # Epoch seconds (used for 30-second snooze timing)
-now_epoch = int(time_module.time_type())
+now_epoch = int(time_module.time())
 
 # ================ TIME UTILITY FUNCTIONS ================
 # Define time conversion functions early so they can be used throughout the code
@@ -3528,7 +3528,7 @@ for idx, row in df_raw.iterrows():
                         val = int(until_raw)
                         # Legacy values were stored as minutes since midnight (small numbers)
                         if val < 100000:
-                            midnight_ist = datetime_type(now.year, now.month, now.day, tzinfo=IST)
+                            midnight_ist = datetime(now.year, now.month, now.day, tzinfo=IST)
                             until_epoch = int(midnight_ist.timestamp()) + (val * 60)
                         else:
                             until_epoch = val
@@ -4024,8 +4024,8 @@ for col in ["Patient Name", "Procedure", "DR.", "FIRST", "SECOND", "Third", "CAS
         display_all[col] = display_all[col].astype(str).replace('nan', '')
 
 # Keep In Time and Out Time as time objects for proper display
-display_all["In Time"] = display_all["In Time"].apply(lambda v: v if isinstance(time_value, time_type) else None)
-display_all["Out Time"] = display_all["Out Time"].apply(lambda v: v if isinstance(time_value, time_type) else None)
+display_all["In Time"] = display_all["In Time"].apply(lambda v: v if isinstance(v, time_type) else None)
+display_all["Out Time"] = display_all["Out Time"].apply(lambda v: v if isinstance(v, time_type) else None)
 
 # Computed overtime indicator (uses scheduled Out Time vs current time)
 def _compute_overtime_min(_row) -> int | None:
@@ -4297,8 +4297,8 @@ if unique_ops:
             display_op["_orig_idx"] = display_op.index
             display_op = display_op.reset_index(drop=True)
             # Ensure time objects are preserved; Streamlit TimeColumn edits best with None for missing
-            display_op["In Time"] = display_op["In Time"].apply(lambda v: v if isinstance(time_value, time_type) else None)
-            display_op["Out Time"] = display_op["Out Time"].apply(lambda v: v if isinstance(time_value, time_type) else None)
+            display_op["In Time"] = display_op["In Time"].apply(lambda v: v if isinstance(v, time_type) else None)
+            display_op["Out Time"] = display_op["Out Time"].apply(lambda v: v if isinstance(v, time_type) else None)
 
             display_op["Overtime (min)"] = op_df.apply(_compute_overtime_min, axis=1)
             
