@@ -754,6 +754,10 @@ with col_title:
         </div>
     """, unsafe_allow_html=True)
 
+# Indian Standard Time (IST = UTC+5:30)
+IST = timezone(timedelta(hours=5, minutes=30))
+now = datetime.now(IST)
+
 st.markdown(f"""
     <style>
     .divider-line {{
@@ -783,7 +787,7 @@ st.markdown(f"""
             <div class="dashboard-subtitle">Real-time Scheduling Management System</div>
         </div>
         <div class="divider-line"></div>
-        <div class="date-line">{datetime.now(IST).strftime('%B %d, %Y - %I:%M:%S %p')} IST</div>
+        <div class="date-line">{now.strftime('%B %d, %Y - %I:%M:%S %p')} IST</div>
     </div>
 """, unsafe_allow_html=True)
 
