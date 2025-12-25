@@ -780,12 +780,20 @@ st.markdown(
         border: 1px solid var(--glass-border);
         border-top: 4px solid var(--accent);
         border-radius: 14px;
-        padding: 0.9rem 1rem;
+        padding: 1rem 1.1rem;
         box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
-        min-height: 150px;
+        min-height: 140px;
         display: flex;
         flex-direction: column;
-        gap: 0.45rem;
+        gap: 0.5rem;
+        backdrop-filter: blur(12px) saturate(140%);
+        -webkit-backdrop-filter: blur(12px) saturate(140%);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }}
+
+    .assistant-card:hover {{
+        transform: translateY(-4px);
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.24);
     }}
 
     .assistant-card.status-free {{ border-top-color: var(--success); }}
@@ -797,58 +805,70 @@ st.markdown(
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 0.5rem;
+        gap: 0.6rem;
+        margin-bottom: 0.25rem;
     }}
 
     .assistant-card__name {{
-        font-size: 1.05rem;
+        font-size: 1.1rem;
         font-weight: 700;
         color: var(--text-primary);
+        letter-spacing: 0.02em;
     }}
 
     .assistant-card__status-pill {{
-        font-size: 0.75rem;
-        padding: 0.15rem 0.6rem;
+        font-size: 0.7rem;
+        padding: 0.2rem 0.65rem;
         border-radius: 999px;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        letter-spacing: 0.06em;
+        font-weight: 600;
+        white-space: nowrap;
     }}
 
     .assistant-card__status-pill.success {{
-        background: rgba(16, 185, 129, 0.15);
+        background: rgba(16, 185, 129, 0.2);
         color: var(--success);
+        border: 1px solid rgba(16, 185, 129, 0.4);
     }}
 
     .assistant-card__status-pill.warning {{
-        background: rgba(245, 158, 11, 0.18);
+        background: rgba(245, 158, 11, 0.2);
         color: var(--warning);
+        border: 1px solid rgba(245, 158, 11, 0.4);
     }}
 
     .assistant-card__status-pill.danger {{
-        background: rgba(239, 68, 68, 0.18);
+        background: rgba(239, 68, 68, 0.2);
         color: var(--danger);
+        border: 1px solid rgba(239, 68, 68, 0.4);
     }}
 
     .assistant-card__status-pill.info {{
-        background: rgba(59, 130, 246, 0.18);
+        background: rgba(59, 130, 246, 0.2);
         color: var(--info);
+        border: 1px solid rgba(59, 130, 246, 0.4);
     }}
 
     .assistant-card__details {{
-        font-size: 0.9rem;
+        font-size: 0.88rem;
         color: var(--text-primary);
-        opacity: 0.85;
+        opacity: 0.9;
+        line-height: 1.4;
+        flex-grow: 1;
     }}
 
     .assistant-card__meta {{
         margin-top: auto;
-        font-size: 0.8rem;
+        padding-top: 0.5rem;
+        font-size: 0.75rem;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.04em;
         color: var(--text-secondary);
+        opacity: 0.8;
         display: flex;
         justify-content: space-between;
+        border-top: 1px solid var(--glass-border);
     }}
 
     @media (max-width: 768px) {{
