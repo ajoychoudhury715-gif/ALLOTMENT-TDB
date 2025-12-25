@@ -32,7 +32,7 @@ A **Streamlit-based real-time scheduling dashboard** for managing dental allotme
 - Toast notifications for status updates
 
 🧩 **Assistant Allocation + Time Blocking**
-- Automatic assistant allocation by department (Prosto/Endo) based on time overlap and availability
+- Automatic assistant allocation by department (PROSTHO/Endo) based on time overlap and availability
 - Manual override supported (auto-allocation can be configured to fill only empty slots)
 - **Time blocks** for assistants (backend work, lunch, training) are persisted:
    - **Supabase**: stored in the same `payload.meta` JSON as the schedule

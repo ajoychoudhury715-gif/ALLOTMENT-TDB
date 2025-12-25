@@ -1,3 +1,4 @@
+# pyright: reportMissingImports=false, reportMissingModuleSource=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownParameterType=false, reportUnknownMemberType=false, reportGeneralTypeIssues=false
 import streamlit as st  # pyright: ignore[reportUndefinedVariable]
 import pandas as pd # pyright: ignore[reportMissingModuleSource]
 from datetime import datetime, time as time_type, timezone, timedelta
@@ -49,15 +50,32 @@ GSHEETS_AVAILABLE = _gsheets_available
 
 # Additional import for auto-refresh (optional)
 try:
-    from streamlit_autorefresh import st_autorefresh # pyright: ignore[reportMissingImports]
+    from streamlit_autorefresh import st_autorefresh as _st_autorefresh  # pyright: ignore[reportMissingImports]
+
+    def st_autorefresh(interval: int = 60000, debounce: bool = True, key: str | None = None) -> int | None:
+        """Typed wrapper to satisfy pyright; returns the autorefresh counter."""
+        try:
+            return _st_autorefresh(interval=interval, debounce=debounce, key=key)
+        except Exception:
+            return None
 except Exception:
     st.error("Missing package 'streamlit-autorefresh'. Install with: pip install -r requirements.txt")
     # fallback no-op to avoid crashing if package is missing
-    def st_autorefresh(interval: int = 60000, debounce: bool = True, key: str | None = None) -> None:
+    def st_autorefresh(interval: int = 60000, debounce: bool = True, key: str | None = None) -> int | None:
         return None
 
 # Page config
 st.set_page_config(page_title="ALLOTMENT", layout="wide", initial_sidebar_state="collapsed")
+
+# Global save-mode flags
+if "auto_save_enabled" not in st.session_state:
+    st.session_state.auto_save_enabled = False
+if "pending_changes" not in st.session_state:
+    st.session_state.pending_changes = False
+if "pending_changes_reason" not in st.session_state:
+    st.session_state.pending_changes_reason = ""
+if "unsaved_df" not in st.session_state:
+    st.session_state.unsaved_df = None
 
 # ===== COLOR CUSTOMIZATION SECTION =====
 # Keep all colors centralized so UI stays consistent.
@@ -1161,7 +1179,7 @@ def _coerce_to_time_obj(time_value: Any) -> time_type | None:
     if time_value is None or pd.isna(time_value) or time_value == "":
         return None
     if isinstance(time_value, time_type):
-        return time_type(time_value.hour, time_value.minute)
+        return time_value
 
     # Strings
     if isinstance(time_value, str):
@@ -1314,7 +1332,7 @@ def _is_blank_cell(value: Any) -> bool:
 
 
 DEPARTMENTS = {
-    "PROSTO": {
+    "PROSTHO": {
         "doctors": _unique_preserve_order([
             "DR.HUSSAIN",  # preferred spelling
             "DR.HUSAIN",   # legacy spelling (kept for compatibility with existing data)
@@ -1390,8 +1408,8 @@ DEPARTMENTS = {
 }
 
 # Combined lists for dropdowns
-ALL_DOCTORS = _unique_preserve_order(DEPARTMENTS["PROSTO"]["doctors"] + DEPARTMENTS["ENDO"]["doctors"])
-ALL_ASSISTANTS = _unique_preserve_order(DEPARTMENTS["PROSTO"]["assistants"] + DEPARTMENTS["ENDO"]["assistants"])
+ALL_DOCTORS = _unique_preserve_order(DEPARTMENTS["PROSTHO"]["doctors"] + DEPARTMENTS["ENDO"]["doctors"])
+ALL_ASSISTANTS = _unique_preserve_order(DEPARTMENTS["PROSTHO"]["assistants"] + DEPARTMENTS["ENDO"]["assistants"])
 
 def get_department_for_doctor(doctor_name: str) -> str:
     """Get the department a doctor belongs to"""
@@ -1438,8 +1456,8 @@ def get_department_for_assistant(assistant_name: str) -> str:
 if "time_blocks" not in st.session_state:
     st.session_state.time_blocks = []  # List of {assistant, start_time, end_time, reason, date}
 
-def add_time_block(assistant: str, start_time: Any, end_time: Any, reason: str = "Backend Work") -> None:
-    """Add a time block for an assistant"""
+def add_time_block(assistant: str, start_time: Any, end_time: Any, reason: str = "Backend Work") -> bool:
+    """Add a time block for an assistant. Returns True when recorded."""
     today_str = now.strftime("%Y-%m-%d")
     block = {
         "assistant": assistant.upper(),
@@ -1589,7 +1607,7 @@ def _apply_time_blocks_to_meta(meta: dict) -> dict:
     return out
 
 # ================ ASSISTANT AVAILABILITY TRACKING ================
-def get_assistant_schedule(assistant_name: str, df_schedule: pd.DataFrame) -> list[dict[str, any]]:
+def get_assistant_schedule(assistant_name: str, df_schedule: pd.DataFrame) -> list[dict[str, Any]]:
     """Get all appointments where this assistant is assigned"""
     if not assistant_name or df_schedule.empty:
         return []
@@ -1713,7 +1731,7 @@ def get_available_assistants(
     check_out_time: Any,
     df_schedule: pd.DataFrame,
     exclude_row_id: str | None = None,
-) -> list[dict[str, any]]:
+) -> list[dict[str, Any]]:
     """
     Get list of available assistants for a department at a specific time.
     Returns list of dicts with assistant name and availability status.
@@ -1928,8 +1946,19 @@ def get_current_assistant_status(df_schedule: pd.DataFrame) -> dict[str, dict[st
         current_appt = None
         
         for appt in schedule:
+            status_text = str(appt.get("status", "")).upper()
             appt_in = _coerce_to_time_obj(appt.get("in_time"))
             appt_out = _coerce_to_time_obj(appt.get("out_time"))
+
+            # If status explicitly says ON GOING, treat as busy regardless of time parsing.
+            if "ON GOING" in status_text or "ONGOING" in status_text:
+                current_appt = appt
+                break
+
+            # If timing is missing but status shows ARRIVED, treat as busy to avoid zero-count glitch.
+            if (appt_in is None or appt_out is None) and "ARRIVED" in status_text:
+                current_appt = appt
+                break
             
             if appt_in is None or appt_out is None:
                 continue
@@ -1994,7 +2023,7 @@ def _render_availability_summary(total: int, free: int, busy: int, blocked: int)
     st.markdown("\n".join(html_parts), unsafe_allow_html=True)
 
 
-def _render_assistant_cards(card_entries: list[dict[str, any]]) -> None:
+def _render_assistant_cards(card_entries: list[dict[str, Any]]) -> None:
     """Render assistant cards with clean HTML (avoids stray text like "< /div>")."""
     if not card_entries:
         st.info("No assistants match the selected filters.")
@@ -2157,7 +2186,7 @@ if (not USE_SUPABASE) and (not USE_GOOGLE_SHEETS):
             USE_GOOGLE_SHEETS = True
 
 
-def _normalize_service_account_info(raw_info: dict[str, any]) -> dict[str, any]:
+def _normalize_service_account_info(raw_info: dict[str, Any]) -> dict[str, Any]:
     """Normalize Streamlit secrets into a dict suitable for google-auth.
 
     Streamlit secrets are often pasted with either literal "\n" sequences or
@@ -2213,7 +2242,7 @@ def _normalize_service_account_info(raw_info: dict[str, any]) -> dict[str, any]:
     return info
 
 
-def _get_service_account_info_from_secrets(secrets_obj: Any) -> dict[str, any]:
+def _get_service_account_info_from_secrets(secrets_obj: Any) -> dict[str, Any]:
     """Support multiple Streamlit secrets shapes.
 
     Supported:
@@ -3038,13 +3067,13 @@ def _should_pause_autorefresh_for_editing() -> bool:
     return any(_data_editor_has_pending_edits(k) for k in keys)
 
 
-# Auto-refresh every 60 seconds when idle.
+# Auto-refresh every 120 seconds (2 minutes) when idle.
 # Pause while editing so the table stays stable and doesn't interrupt typing.
 _pause_autorefresh = bool(st.session_state.get("pause_autorefresh_while_editing", True)) and _should_pause_autorefresh_for_editing()
 if _pause_autorefresh:
     st.caption("⏸ Auto-refresh paused while editing")
 else:
-    st_autorefresh(interval=60000, debounce=True, key="autorefresh")
+    st_autorefresh(interval=120000, debounce=True, key="autorefresh")
 
 # ================ Load Data ================
 df_raw = None
@@ -3113,6 +3142,13 @@ else:
     if df_raw is None:
         st.error("⚠️ Failed to load the Excel file after multiple attempts.")
         st.stop()
+
+# Prefer in-session pending changes when auto-save is off
+if st.session_state.get("unsaved_df") is not None:
+    try:
+        df_raw = st.session_state.unsaved_df.copy()
+    except Exception:
+        df_raw = st.session_state.unsaved_df
 
 # Clean column names
 df_raw.columns = [col.strip() for col in df_raw.columns]
@@ -3320,6 +3356,31 @@ def save_data(dataframe, show_toast=True, message="Data saved!"):
         return False
 
 
+def _queue_unsaved_df(df_pending: pd.DataFrame, reason: str = "") -> None:
+    """Keep changes in memory when auto-save is disabled."""
+    try:
+        st.session_state.unsaved_df = df_pending.copy()
+    except Exception:
+        st.session_state.unsaved_df = df_pending
+    st.session_state.pending_changes = True
+    st.session_state.pending_changes_reason = reason
+
+
+def _maybe_save(dataframe, show_toast=True, message="Data saved!"):
+    """Respect auto-save toggle; queue changes if disabled."""
+    if st.session_state.get("auto_save_enabled", False):
+        result = save_data(dataframe, show_toast=show_toast, message=message)
+        st.session_state.unsaved_df = None
+        st.session_state.pending_changes = False
+        st.session_state.pending_changes_reason = ""
+        return result
+
+    _queue_unsaved_df(dataframe, reason=message)
+    if show_toast:
+        st.toast("⏸ Auto-save disabled. Click 'Save Changes' to persist.", icon="⏸")
+    return True
+
+
 def _build_schedule_backups(df_any: pd.DataFrame) -> tuple[bytes, bytes]:
     """Return (csv_bytes, xlsx_bytes) for the current schedule."""
     csv_bytes = df_any.to_csv(index=False).encode("utf-8")
@@ -3357,6 +3418,21 @@ def _make_cleared_schedule(df_existing: pd.DataFrame) -> pd.DataFrame:
 
 # ================ TIME BLOCKING UI (persisted) ================
 with st.sidebar:
+    st.markdown("## 💾 Save Mode")
+    st.session_state.auto_save_enabled = st.checkbox(
+        "Enable auto-save",
+        value=st.session_state.get("auto_save_enabled", False),
+        help="When off, changes stay in session until you click 'Save Changes'."
+    )
+    if st.session_state.get("pending_changes"):
+        st.caption("Pending changes not yet saved. Click 'Save Changes'.")
+        if st.session_state.auto_save_enabled and st.session_state.get("unsaved_df") is not None:
+            _maybe_save(
+                st.session_state.unsaved_df,
+                show_toast=False,
+                message=st.session_state.get("pending_changes_reason") or "Auto-saved pending changes",
+            )
+
     st.markdown("---")
     st.markdown("## ⏰ Time Blocking")
     st.caption("Block assistants for backend work")
@@ -3386,12 +3462,13 @@ with st.sidebar:
                 st.warning("Please select an assistant")
             else:
                 add_time_block(block_assistant, block_start, block_end, block_reason)
-                save_data(df_raw, show_toast=True, message="Time block saved")
+                _maybe_save(df_raw, show_toast=True, message="Time block saved")
                 st.success(
                     f"✅ Blocked {block_assistant} from {block_start.strftime('%H:%M')} to {block_end.strftime('%H:%M')}"
                 )
                 # Force reload from storage to ensure persistence
-                _sync_time_blocks_from_meta(df_raw)
+                if st.session_state.get("auto_save_enabled", False):
+                    _sync_time_blocks_from_meta(df_raw)
                 st.rerun()
 
     # Show current time blocks
@@ -3411,9 +3488,10 @@ with st.sidebar:
                     try:
                         actual_idx = st.session_state.time_blocks.index(block)
                         remove_time_block(actual_idx)
-                        save_data(df_raw, show_toast=True, message="Time block removed")
+                        _maybe_save(df_raw, show_toast=True, message="Time block removed")
                         # Force reload from storage to ensure persistence
-                        _sync_time_blocks_from_meta(df_raw)
+                        if st.session_state.get("auto_save_enabled", False):
+                            _sync_time_blocks_from_meta(df_raw)
                     except Exception:
                         pass
                     st.rerun()
@@ -3494,19 +3572,32 @@ with st.sidebar:
 def _persist_reminder_to_storage(row_id, until, dismissed):
     """Persist snooze/dismiss fields back to storage by row ID."""
     try:
-        match = df_raw[df_raw.get('REMINDER_ROW_ID') == row_id]
-        if not match.empty:
-            ix = match.index[0]
-            df_raw.at[ix, 'REMINDER_SNOOZE_UNTIL'] = int(until) if until is not None else pd.NA
-            df_raw.at[ix, 'REMINDER_DISMISSED'] = bool(dismissed)
+        if df_raw is None or not isinstance(df_raw, pd.DataFrame):
+            st.error("Schedule not loaded; cannot persist reminder.")
+            return False
+
+        if 'REMINDER_ROW_ID' not in df_raw.columns:
+            st.error("Reminder column missing; cannot persist reminder.")
+            return False
+
+        match = df_raw[df_raw['REMINDER_ROW_ID'] == row_id]
+        if match.empty:
+            return False
+
+        ix = match.index[0]
+        df_raw.at[ix, 'REMINDER_SNOOZE_UNTIL'] = int(until) if until is not None else pd.NA
+        df_raw.at[ix, 'REMINDER_DISMISSED'] = bool(dismissed)
+        if st.session_state.get("auto_save_enabled", False):
             return save_data(df_raw, show_toast=False)
+        _queue_unsaved_df(df_raw, reason="Reminder updates pending")
+        return True
     except Exception as e:
         st.error(f"Error persisting reminder: {e}")
     return False
 
 # Save reminder IDs if they were just generated
 if _needs_id_save:
-    save_data(df_raw, message="Generated stable row IDs for reminders")
+    _maybe_save(df_raw, message="Generated stable row IDs for reminders")
 
 # ================ Change Detection & Notifications ================
 if 'prev_hash' not in st.session_state:
@@ -3782,6 +3873,11 @@ all_sorted = df
 # Manual save button and patient controls for schedule editor
 st.markdown("### 📋 Full Schedule")
 
+if not st.session_state.get("auto_save_enabled", False):
+    st.caption("Auto-save is OFF. Use 'Save Changes' to persist updates.")
+if st.session_state.get("pending_changes"):
+    st.warning("You have pending changes that are not saved yet.")
+
 # Add new patient button and save button
 col_add, col_save, col_del_pick, col_del_btn, col_search = st.columns([0.20, 0.16, 0.18, 0.07, 0.39])
 
@@ -3821,8 +3917,8 @@ with col_add:
         # Append to the original dataframe
         new_row_df = pd.DataFrame([new_row])
         df_raw_with_new = pd.concat([df_raw, new_row_df], ignore_index=True)
-        # Save immediately
-        save_data(df_raw_with_new, message="New patient row added!")
+        # Save or queue depending on auto-save mode
+        _maybe_save(df_raw_with_new, message="New patient row added!")
         st.rerun()
 
 with col_save:
@@ -3912,7 +4008,7 @@ with col_del_btn:
                 except Exception:
                     pass
 
-                save_data(df_updated, message="Row deleted")
+                _maybe_save(df_updated, message="Row deleted")
                 st.session_state.delete_row_id = ""
                 st.rerun()
             except Exception as e:
@@ -4106,47 +4202,73 @@ edited_all = st.data_editor(
 )
 
 # ================ Manual save: process edits only when user clicks save button ================
-if st.session_state.get("manual_save_triggered") and edited_all is not None:
-    # Compare non-time columns to detect changes (time columns need special handling due to object type)
-    has_changes = False
-    if not edited_all.equals(display_all):
-        # Check actual value differences (skip _orig_idx which is for internal tracking)
-        for col in edited_all.columns:
-            if col not in ["In Time", "Out Time", "_orig_idx"]:
-                if not (edited_all[col] == display_all[col]).all():
-                    has_changes = True
-                    break
-        # For time columns, compare the string representation
-        if not has_changes:
-            for col in ["In Time", "Out Time"]:
-                if col in edited_all.columns:
-                    edited_times = edited_all[col].astype(str)
-                    display_times = display_all[col].astype(str)
-                    if not (edited_times == display_times).all():
+if st.session_state.get("manual_save_triggered"):
+    # If auto-save is off and we already queued a dataframe, persist it immediately
+    pending_df = st.session_state.get("unsaved_df")
+    if pending_df is not None:
+        pending_msg = st.session_state.get("pending_changes_reason") or "Pending changes saved!"
+        if save_data(pending_df, message=pending_msg):
+            st.session_state.unsaved_df = None
+            st.session_state.pending_changes = False
+            st.session_state.pending_changes_reason = ""
+        st.session_state.manual_save_triggered = False
+        st.rerun()
+
+    if edited_all is not None:
+        # Compare non-time columns to detect changes (time columns need special handling due to object type)
+        has_changes = False
+        if not edited_all.equals(display_all):
+            # Check actual value differences (skip _orig_idx which is for internal tracking)
+            for col in edited_all.columns:
+                if col not in ["In Time", "Out Time", "_orig_idx"]:
+                    if not (edited_all[col] == display_all[col]).all():
                         has_changes = True
                         break
-    
-    if has_changes:
-        try:
-            # Create a copy of the raw data to update
-            df_updated = df_raw.copy()
+            # For time columns, compare the string representation
+            if not has_changes:
+                for col in ["In Time", "Out Time"]:
+                    if col in edited_all.columns:
+                        edited_times = edited_all[col].astype(str)
+                        display_times = display_all[col].astype(str)
+                        if not (edited_times == display_times).all():
+                            has_changes = True
+                            break
+        
+        if has_changes:
+            try:
+                # Create a copy of the raw data to update
+                df_updated = df_raw.copy()
 
-            # Track which rows are worth attempting auto-allocation for
-            allocation_candidates: set[int] = set()
-            
-            # Process edited data and convert back to original format
-            for idx, row in edited_all.iterrows():
-                # Use the preserved original index to map back to df_raw
-                orig_idx = row.get("_orig_idx", idx)
-                if pd.isna(orig_idx):
-                    orig_idx = idx
-                orig_idx = int(orig_idx)
+                # Track which rows are worth attempting auto-allocation for
+                allocation_candidates: set[int] = set()
                 
-                if orig_idx < len(df_updated):
+                # Process edited data and convert back to original format
+                for idx, row in edited_all.iterrows():
+                    # Use the preserved original index to map back to df_raw; append when new
+                    orig_idx_raw = row.get("_orig_idx", idx)
+                    if pd.isna(orig_idx_raw):
+                        orig_idx_raw = idx
+                    orig_idx = int(orig_idx_raw)
+
+                    is_new_row = orig_idx >= len(df_updated)
+                    if is_new_row:
+                        # Append a blank base row with stable reminder fields
+                        base_row = {col: "" for col in df_updated.columns}
+                        if "REMINDER_ROW_ID" in base_row:
+                            base_row["REMINDER_ROW_ID"] = str(uuid.uuid4())
+                        if "REMINDER_SNOOZE_UNTIL" in base_row:
+                            base_row["REMINDER_SNOOZE_UNTIL"] = pd.NA
+                        if "REMINDER_DISMISSED" in base_row:
+                            base_row["REMINDER_DISMISSED"] = False
+                        if "STATUS" in base_row and not base_row.get("STATUS"):
+                            base_row["STATUS"] = "WAITING"
+                        df_updated = pd.concat([df_updated, pd.DataFrame([base_row])], ignore_index=True)
+                        orig_idx = len(df_updated) - 1
+
                     try:
                         old_status_norm = ""
                         try:
-                            if "STATUS" in df_raw.columns:
+                            if (not is_new_row) and ("STATUS" in df_raw.columns) and (orig_idx < len(df_raw)):
                                 old_status_norm = str(df_raw.iloc[orig_idx, df_raw.columns.get_loc("STATUS")]).strip().upper()
                         except Exception:
                             old_status_norm = ""
@@ -4159,7 +4281,8 @@ if st.session_state.get("manual_save_triggered") and edited_all is not None:
                             df_updated.iloc[orig_idx, df_updated.columns.get_loc("Patient ID")] = pid
 
                         # Handle Patient Name
-                        patient_name = str(row["Patient Name"]).strip() if row["Patient Name"] and str(row["Patient Name"]) != "" else ""
+                        patient_name_raw = row.get("Patient Name", "")
+                        patient_name = "" if pd.isna(patient_name_raw) else str(patient_name_raw).strip()
                         if patient_name == "":
                             # Clear row if patient name is empty, but preserve stable row id
                             # so users can still delete the blank row from the dropdown.
@@ -4219,7 +4342,8 @@ if st.session_state.get("manual_save_triggered") and edited_all is not None:
                                     if "STATUS_LOG" in df_updated.columns:
                                         existing_log = ""
                                         try:
-                                            existing_log = str(df_raw.iloc[orig_idx, df_raw.columns.get_loc("STATUS_LOG")]) if "STATUS_LOG" in df_raw.columns else ""
+                                            if (not is_new_row) and (orig_idx < len(df_raw)) and ("STATUS_LOG" in df_raw.columns):
+                                                existing_log = str(df_raw.iloc[orig_idx, df_raw.columns.get_loc("STATUS_LOG")])
                                         except Exception:
                                             existing_log = ""
                                         df_updated.iloc[orig_idx, df_updated.columns.get_loc("STATUS_LOG")] = _append_status_log(
@@ -4251,20 +4375,27 @@ if st.session_state.get("manual_save_triggered") and edited_all is not None:
                         st.warning(f"Warning updating row {orig_idx}: {str(col_error)}")
                         continue
 
-            # Auto-allocate assistants after applying all row edits
-            if bool(st.session_state.get("auto_assign_assistants", True)):
-                only_empty = bool(st.session_state.get("auto_assign_only_empty", True))
-                for ix in sorted(allocation_candidates):
-                    _auto_fill_assistants_for_row(df_updated, ix, only_fill_empty=only_empty)
-            
-            # Write back to storage
-            save_data(df_updated, message="Schedule updated!")
-            # Reset save trigger and refresh
+                # Auto-allocate assistants after applying all row edits
+                if bool(st.session_state.get("auto_assign_assistants", True)):
+                    only_empty = bool(st.session_state.get("auto_assign_only_empty", True))
+                    for ix in sorted(allocation_candidates):
+                        _auto_fill_assistants_for_row(df_updated, ix, only_fill_empty=only_empty)
+                
+                # Write back to storage (manual save always persists)
+                save_data(df_updated, message="Schedule updated!")
+                st.session_state.manual_save_triggered = False
+                st.session_state.unsaved_df = None
+                st.session_state.pending_changes = False
+                st.session_state.pending_changes_reason = ""
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error saving: {e}")
+                st.session_state.manual_save_triggered = False
+        else:
+            # Nothing changed; clear the trigger so it doesn't keep firing on rerun
             st.session_state.manual_save_triggered = False
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error saving: {e}")
-            st.session_state.manual_save_triggered = False
+    else:
+        st.session_state.manual_save_triggered = False
 
 # ================ Per Chair Tabs ================
 st.markdown("###  Schedule by OP")
@@ -4384,16 +4515,28 @@ if unique_ops:
                         df_updated = df_raw.copy()
                         allocation_candidates: set[int] = set()
                         for _, row in edited_op.iterrows():
-                            orig_idx = row.get("_orig_idx")
-                            if pd.isna(orig_idx):
-                                continue
-                            orig_idx = int(orig_idx)
-                            if orig_idx < 0 or orig_idx >= len(df_updated):
-                                continue
+                            orig_idx_raw = row.get("_orig_idx")
+                            if pd.isna(orig_idx_raw):
+                                orig_idx_raw = len(df_updated)
+                            orig_idx = int(orig_idx_raw)
+
+                            is_new_row = (orig_idx < 0) or (orig_idx >= len(df_updated))
+                            if is_new_row:
+                                base_row = {col: "" for col in df_updated.columns}
+                                if "REMINDER_ROW_ID" in base_row:
+                                    base_row["REMINDER_ROW_ID"] = str(uuid.uuid4())
+                                if "REMINDER_SNOOZE_UNTIL" in base_row:
+                                    base_row["REMINDER_SNOOZE_UNTIL"] = pd.NA
+                                if "REMINDER_DISMISSED" in base_row:
+                                    base_row["REMINDER_DISMISSED"] = False
+                                if "STATUS" in base_row and not base_row.get("STATUS"):
+                                    base_row["STATUS"] = "WAITING"
+                                df_updated = pd.concat([df_updated, pd.DataFrame([base_row])], ignore_index=True)
+                                orig_idx = len(df_updated) - 1
 
                             old_status_norm = ""
                             try:
-                                if "STATUS" in df_raw.columns:
+                                if (not is_new_row) and ("STATUS" in df_raw.columns) and (orig_idx < len(df_raw)):
                                     old_status_norm = str(df_raw.iloc[orig_idx, df_raw.columns.get_loc("STATUS")]).strip().upper()
                             except Exception:
                                 old_status_norm = ""
@@ -4404,9 +4547,18 @@ if unique_ops:
                                 df_updated.iloc[orig_idx, df_updated.columns.get_loc("Patient ID")] = patient_id
 
                             # Patient Name
-                            patient_name = str(row.get("Patient Name", "")).strip()
+                            patient_name_raw = row.get("Patient Name", "")
+                            patient_name = "" if pd.isna(patient_name_raw) else str(patient_name_raw).strip()
                             if patient_name == "":
                                 for c in df_updated.columns:
+                                    if c == "REMINDER_ROW_ID":
+                                        continue
+                                    if c == "REMINDER_SNOOZE_UNTIL":
+                                        df_updated.iloc[orig_idx, df_updated.columns.get_loc(c)] = pd.NA
+                                        continue
+                                    if c == "REMINDER_DISMISSED":
+                                        df_updated.iloc[orig_idx, df_updated.columns.get_loc(c)] = False
+                                        continue
                                     df_updated.iloc[orig_idx, df_updated.columns.get_loc(c)] = ""
                                 continue
                             if "Patient Name" in df_updated.columns:
@@ -4451,7 +4603,8 @@ if unique_ops:
                                         if "STATUS_LOG" in df_updated.columns:
                                             existing_log = ""
                                             try:
-                                                existing_log = str(df_raw.iloc[orig_idx, df_raw.columns.get_loc("STATUS_LOG")]) if "STATUS_LOG" in df_raw.columns else ""
+                                                if (not is_new_row) and (orig_idx < len(df_raw)) and ("STATUS_LOG" in df_raw.columns):
+                                                    existing_log = str(df_raw.iloc[orig_idx, df_raw.columns.get_loc("STATUS_LOG")])
                                             except Exception:
                                                 existing_log = ""
                                             df_updated.iloc[orig_idx, df_updated.columns.get_loc("STATUS_LOG")] = _append_status_log(
@@ -4478,7 +4631,7 @@ if unique_ops:
                             for ix in sorted(allocation_candidates):
                                 _auto_fill_assistants_for_row(df_updated, ix, only_fill_empty=only_empty)
 
-                        save_data(df_updated, message=f"Schedule updated for {op}!")
+                        _maybe_save(df_updated, message=f"Schedule updated for {op}!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error saving {op} edits: {e}")
@@ -4509,6 +4662,13 @@ st.markdown("---")
 # Get current status of all assistants
 assistant_status = get_current_assistant_status(df)
 
+def _norm_status_value(value: Any) -> str:
+    try:
+        s = str(value or "").strip().upper()
+    except Exception:
+        s = ""
+    return s if s else "UNKNOWN"
+
 assistant_entries: list[dict] = []
 for assistant in ALL_ASSISTANTS:
     raw_name = assistant.strip().upper()
@@ -4528,15 +4688,15 @@ for assistant in ALL_ASSISTANTS:
 assistant_lookup = {entry["raw_name"]: entry for entry in assistant_entries}
 
 # Create tabs for each department
-dept_tabs = st.tabs(["📊 All Assistants", "🦷 PROSTO Department", "🔬 ENDO Department"])
+dept_tabs = st.tabs(["📊 All Assistants", "🦷 PROSTHO Department", "🔬 ENDO Department"])
 
 with dept_tabs[0]:
     st.markdown("#### Overview")
     
     total_count = len(assistant_entries)
-    free_count = sum(1 for entry in assistant_entries if str(entry["info"].get("status")).upper() == "FREE")
-    busy_count = sum(1 for entry in assistant_entries if str(entry["info"].get("status")).upper() == "BUSY")
-    blocked_count = sum(1 for entry in assistant_entries if str(entry["info"].get("status")).upper() == "BLOCKED")
+    free_count = sum(1 for entry in assistant_entries if _norm_status_value(entry["info"].get("status")) == "FREE")
+    busy_count = sum(1 for entry in assistant_entries if _norm_status_value(entry["info"].get("status")) == "BUSY")
+    blocked_count = sum(1 for entry in assistant_entries if _norm_status_value(entry["info"].get("status")) == "BLOCKED")
 
     _render_availability_summary(total_count, free_count, busy_count, blocked_count)
 
@@ -4559,7 +4719,7 @@ with dept_tabs[0]:
     st.caption("💡 Use the filter to focus on assistants who are free, busy, or currently blocked.")
 
     if selected_statuses:
-        filtered_entries = [entry for entry in assistant_entries if str(entry["info"].get("status", "UNKNOWN")).upper() in selected_statuses]
+        filtered_entries = [entry for entry in assistant_entries if _norm_status_value(entry["info"].get("status")) in selected_statuses]
     else:
         filtered_entries = assistant_entries
 
@@ -4570,33 +4730,33 @@ with dept_tabs[0]:
         st.info("No assistants match the selected filters.")
 
 with dept_tabs[1]:
-    st.markdown("#### PROSTO Department Assistants")
-    prosto_entries: list[dict] = []
-    for assistant in DEPARTMENTS["PROSTO"]["assistants"]:
+    st.markdown("#### PROSTHO Department Assistants")
+    prostho_entries: list[dict] = []
+    for assistant in DEPARTMENTS["PROSTHO"]["assistants"]:
         entry = assistant_lookup.get(assistant.upper())
         if entry is None:
             fallback_info = {
                 "status": "UNKNOWN",
                 "reason": "No schedule",
-                "department": "PROSTO",
+                "department": "PROSTHO",
             }
             entry = {"name": assistant.title(), "raw_name": assistant.upper(), "info": fallback_info}
-        prosto_entries.append(entry)
+        prostho_entries.append(entry)
 
-    prosto_counts: dict[str, int] = {}
-    for entry in prosto_entries:
-        status_key = str(entry["info"].get("status", "UNKNOWN")).upper()
-        prosto_counts[status_key] = prosto_counts.get(status_key, 0) + 1
+    prostho_counts: dict[str, int] = {}
+    for entry in prostho_entries:
+        status_key = _norm_status_value(entry["info"].get("status"))
+        prostho_counts[status_key] = prostho_counts.get(status_key, 0) + 1
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("🟢 Free", prosto_counts.get('FREE', 0))
+        st.metric("🟢 Free", prostho_counts.get('FREE', 0))
     with col2:
-        st.metric("🔴 Busy", prosto_counts.get('BUSY', 0))
+        st.metric("🔴 Busy", prostho_counts.get('BUSY', 0))
     with col3:
-        st.metric("🚫 Blocked", prosto_counts.get('BLOCKED', 0))
+        st.metric("🚫 Blocked", prostho_counts.get('BLOCKED', 0))
     
-    _render_assistant_cards(prosto_entries)
+    _render_assistant_cards(prostho_entries)
 
 with dept_tabs[2]:
     st.markdown("#### ENDO Department Assistants")
@@ -4614,7 +4774,7 @@ with dept_tabs[2]:
 
     endo_counts: dict[str, int] = {}
     for entry in endo_entries:
-        status_key = str(entry["info"].get("status", "UNKNOWN")).upper()
+        status_key = _norm_status_value(entry["info"].get("status"))
         endo_counts[status_key] = endo_counts.get(status_key, 0) + 1
     
     col1, col2, col3 = st.columns(3)
