@@ -2543,33 +2543,55 @@ if "meta" not in df_raw.attrs:
 _sync_time_blocks_from_meta(df_raw)
 
 # ================ ASSISTANTS WEEKLY OFF DISPLAY (MAIN CONTENT) ================
-# Show a prominent banner for today's weekly off assistants at the top of the page
-_today_off_display = WEEKLY_OFF.get(now.weekday(), [])
-if _today_off_display:
-    _off_names_display = ", ".join(_today_off_display)
+weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+today_idx = now.weekday()
+tomorrow_idx = (today_idx + 1) % 7
+
+def _render_off_card(title: str, off_list: list[str], is_today: bool):
+    has_off = bool(off_list)
+    names = ", ".join(off_list) if has_off else "All assistants available"
+    icon = "🚫" if has_off else "✅"
+    bg = COLORS['danger'] if has_off else COLORS['success']
+    border = COLORS['danger'] if has_off else COLORS['success']
+    note = "Cannot be allocated" if has_off else "No weekly off today"
     st.markdown(
         f"""
         <div style="
-            background: linear-gradient(135deg, {COLORS['danger']}15, {COLORS['warning']}10);
-            border: 1px solid {COLORS['danger']}40;
-            border-left: 4px solid {COLORS['danger']};
+            background: linear-gradient(135deg, {bg}15, {COLORS['accent']}10);
+            border: 1px solid {border}40;
+            border-left: 4px solid {border};
             border-radius: 8px;
-            padding: 12px 16px;
-            margin: 10px 0 16px 0;
+            padding: 12px 14px;
+            margin: 8px 0 12px 0;
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
         ">
-            <span style="font-size: 1.4em;">🚫</span>
+            <span style="font-size: 1.3em;">{icon}</span>
             <div>
-                <strong style="color: {COLORS['text_primary']};">Weekly Off Today ({now.strftime('%A')})</strong>
+                <strong style="color: {COLORS['text_primary']};">{title}</strong>
                 <div style="color: {COLORS['text_secondary']}; margin-top: 2px;">
-                    <strong>{_off_names_display}</strong> — Cannot be allocated today
+                    <strong>{names}</strong> — {note}
                 </div>
             </div>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
+    )
+
+st.markdown("### 🗓️ Assistants Weekly Off")
+col_today, col_tomorrow = st.columns(2)
+with col_today:
+    _render_off_card(
+        f"Today ({weekday_names[today_idx]})",
+        WEEKLY_OFF.get(today_idx, []),
+        True,
+    )
+with col_tomorrow:
+    _render_off_card(
+        f"Tomorrow ({weekday_names[tomorrow_idx]})",
+        WEEKLY_OFF.get(tomorrow_idx, []),
+        False,
     )
 
 # Ensure expected columns exist (backfills older data/backends)
