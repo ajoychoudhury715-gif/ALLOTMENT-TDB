@@ -1499,20 +1499,34 @@ with st.sidebar:
 # ================ WEEKLY OFF DISPLAY ================
 with st.sidebar:
     st.markdown("---")
-    st.markdown("## 📋 Today's Assistants Off")
+    st.markdown("## 📋 Assistant Weekly Off Schedule")
     
     today_weekday = now.weekday()  # 0=Monday, 6=Sunday
     weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     today_name = weekday_names[today_weekday]
     
+    # TODAY'S OFF
     today_off = WEEKLY_OFF.get(today_weekday, [])
-    
+    st.markdown("**Today:**")
     if today_off:
         off_text = ", ".join(today_off)
-        st.warning(f"🔴 **{today_name}**: {off_text}")
-        st.caption("These assistants are off today and cannot be allocated.")
+        st.warning(f"🔴 {off_text}")
+        st.caption("Cannot be allocated today.")
     else:
-        st.success(f"✅ **{today_name}**: All assistants available")
+        st.success(f"✅ All assistants available")
+    
+    # TOMORROW'S OFF
+    tomorrow_weekday = (today_weekday + 1) % 7  # Next day, wrap around if Sunday
+    tomorrow_name = weekday_names[tomorrow_weekday]
+    tomorrow_off = WEEKLY_OFF.get(tomorrow_weekday, [])
+    
+    st.markdown("**Tomorrow:**")
+    if tomorrow_off:
+        off_text = ", ".join(tomorrow_off)
+        st.info(f"ℹ️ {tomorrow_name}: {off_text}")
+        st.caption("Will be off tomorrow - plan accordingly.")
+    else:
+        st.success(f"✅ {tomorrow_name}: All assistants available")
 
 with st.sidebar:
     st.markdown("---")
