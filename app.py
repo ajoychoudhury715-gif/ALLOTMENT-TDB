@@ -754,22 +754,38 @@ with col_title:
         </div>
     """, unsafe_allow_html=True)
 
-st.markdown("""
+st.markdown(f"""
     <style>
-    .divider-line {
+    .divider-line {{
         height: 2px;
         background: linear-gradient(90deg, transparent 0%, #99582f 50%, transparent 100%);
         margin: 0.8rem 0;
         border-radius: 1px;
-    }
+    }}
+    .sticky-top {{
+        position: sticky;
+        top: 0;
+        z-index: 999;
+        background: var(--bg-primary);
+        padding: 0.75rem 0 0.5rem 0;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    }}
+    .date-line {{
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-top: 0.5rem;
+    }}
     </style>
-    <div class="divider-line"></div>
+    <div class="sticky-top">
+        <div class="header-container">
+            <div class="dashboard-title">ALLOTMENT DASHBOARD</div>
+            <div class="dashboard-subtitle">Real-time Scheduling Management System</div>
+        </div>
+        <div class="divider-line"></div>
+        <div class="date-line">{datetime.now(IST).strftime('%B %d, %Y - %I:%M:%S %p')} IST</div>
+    </div>
 """, unsafe_allow_html=True)
-
-# Indian Standard Time (IST = UTC+5:30)
-IST = timezone(timedelta(hours=5, minutes=30))
-now = datetime.now(IST)
-st.markdown(f" {now.strftime('%B %d, %Y - %I:%M:%S %p')} IST")
 
 # Assistants Weekly Off display (10mm below date)
 st.markdown("<div style='margin-top:10mm;'></div>", unsafe_allow_html=True)
