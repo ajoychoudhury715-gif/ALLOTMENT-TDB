@@ -891,8 +891,14 @@ DEPARTMENTS = {
         "allocation_rules": {
             # Doctor-specific and time-based allocation for ENDO
             "FIRST": {
-                # DR. NIMAI: Archana only (if not available, use first available from department)
+                # DR. NIMAI: Archana only (one assistant)
                 "DR.NIMAI": ["ARCHANA"],
+                # Other doctors: At least two assistants
+                "DR.FARHATH": ["ANYA", "LAVANYA", "ROHINI"],
+                "DR.SHRUTI": ["LAVANYA", "ANYA", "ROHINI"],
+                "DR.KALPANA": ["ROHINI", "ANYA", "LAVANYA"],
+                "DR.MANVEEN": ["ANYA", "ROHINI", "LAVANYA"],
+                "DR.NEHA": ["LAVANYA", "ROHINI", "ANYA"],
                 # Default: Anya after 12pm, then Lavanya, Rohini
                 "default": ["LAVANYA", "ROHINI", "ANYA"],
                 "time_override": [(12, "ANYA")]
@@ -1333,35 +1339,42 @@ def _auto_fill_assistants_for_row(df_schedule: pd.DataFrame, row_index: int, onl
             if role in allocation_rules:
                 rule = allocation_rules[role]
                 
-                # Check for conditional rules first (e.g., when FIRST is Anshika, use Archana for SECOND)
-                if "when_first_is" in rule and role == "SECOND":
-                    first_assistant = df_schedule.iloc[row_index, df_schedule.columns.get_loc("FIRST")] if "FIRST" in df_schedule.columns else ""
-                    first_assistant = str(first_assistant).strip()
-                    if first_assistant and first_assistant in rule["when_first_is"]:
-                        conditional_list = rule["when_first_is"][first_assistant]
-                        for assistant_name in conditional_list:
-                            if assistant_name.upper() not in already and assistant_name.upper() in free_assistants:
-                                preferred_assistants.append(free_assistants[assistant_name.upper()])
+                # Try default rules first (unless there are conditional rules for SECOND)
+                default_list = rule.get("default", [])
+                for assistant_name in default_list:
+                    if assistant_name.upper() not in already and assistant_name.upper() in free_assistants:
+                        preferred_assistants.append(free_assistants[assistant_name.upper()])
                 
-                # Check for time overrides (for FIRST role)
-                if not preferred_assistants and role == "FIRST" and "time_override" in rule:
-                    time_overrides = rule["time_override"]
-                    # Handle both list of tuples and single tuple formats
-                    if isinstance(time_overrides, list):
-                        for item in time_overrides:
-                            if isinstance(item, tuple):
-                                start_hour, assistant_name = item
-                                if appt_hour >= start_hour:
-                                    if assistant_name.upper() not in already and assistant_name.upper() in free_assistants:
-                                        preferred_assistants.append(free_assistants[assistant_name.upper()])
-
-                
-                # If no conditional/override matched, use doctor-specific or default rules
-                if not preferred_assistants:
-                    doctor_assistant_list = rule.get(doctor, rule.get("default", []))
+                # If we found from default, use them
+                if preferred_assistants:
+                    pass  # We have preferred assistants from default rules
+                else:
+                    # Only use doctor-specific rules if we're short of assistants (fallback)
+                    doctor_assistant_list = rule.get(doctor, [])
                     for assistant_name in doctor_assistant_list:
                         if assistant_name.upper() not in already and assistant_name.upper() in free_assistants:
                             preferred_assistants.append(free_assistants[assistant_name.upper()])
+                    
+                    # If still no preferred assistants and conditional rules exist, try those
+                    if not preferred_assistants and "when_first_is" in rule and role == "SECOND":
+                        first_assistant = df_schedule.iloc[row_index, df_schedule.columns.get_loc("FIRST")] if "FIRST" in df_schedule.columns else ""
+                        first_assistant = str(first_assistant).strip()
+                        if first_assistant and first_assistant in rule["when_first_is"]:
+                            conditional_list = rule["when_first_is"][first_assistant]
+                            for assistant_name in conditional_list:
+                                if assistant_name.upper() not in already and assistant_name.upper() in free_assistants:
+                                    preferred_assistants.append(free_assistants[assistant_name.upper()])
+                    
+                    # Last resort: check time overrides (for FIRST role)
+                    if not preferred_assistants and role == "FIRST" and "time_override" in rule:
+                        time_overrides = rule["time_override"]
+                        if isinstance(time_overrides, list):
+                            for item in time_overrides:
+                                if isinstance(item, tuple):
+                                    start_hour, assistant_name = item
+                                    if appt_hour >= start_hour:
+                                        if assistant_name.upper() not in already and assistant_name.upper() in free_assistants:
+                                            preferred_assistants.append(free_assistants[assistant_name.upper()])
 
             # If we have preferred assistants from rules, use the first available
             if preferred_assistants:
