@@ -1162,8 +1162,6 @@ def _coerce_to_time_obj(time_value: Any) -> time_type | None:
         return None
     if isinstance(time_value, time_type):
         return time_type(time_value.hour, time_value.minute)
-    if isinstance(time_value, time_type):
-        return time_type(time_value.hour, time_value.minute)
 
     # Strings
     if isinstance(time_value, str):
@@ -1277,7 +1275,7 @@ def time_to_minutes(time_value: Any) -> int | None:
     """Convert time values to minutes since midnight for comparison"""
     t = _coerce_to_time_obj(time_value)
     if t is None:
-        return pd.NA
+        return None
     return t.hour * 60 + t.minute
 
 # ================ DEPARTMENT & STAFF CONFIGURATION ================
