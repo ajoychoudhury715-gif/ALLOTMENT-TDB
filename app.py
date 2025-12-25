@@ -874,45 +874,112 @@ with col_title:
         <style>
         .header-container {
             position: relative;
-            padding: 1.5rem 0;
+            padding: 2rem 0 1.8rem 0;
             text-align: center;
             color: #111b26;
-            overflow: hidden;
+            overflow: visible;
         }
+
+        /* Premium animated dazzle/glow behind title */
         .header-container::before {
             content: "";
             position: absolute;
-            inset: -0.5rem 2.5rem;
-            background: linear-gradient(120deg, rgba(153, 88, 47, 0.22), rgba(201, 187, 176, 0.18));
-            border-radius: 60px;
-            filter: blur(12px);
-            opacity: 0.85;
-            z-index: -2;
+            top: 50%;
+            left: 50%;
+            width: 420px;
+            height: 120px;
+            transform: translate(-50%, -50%);
+            background: radial-gradient(ellipse at center,
+                rgba(153, 88, 47, 0.45) 0%,
+                rgba(201, 187, 176, 0.30) 35%,
+                rgba(153, 88, 47, 0.18) 60%,
+                transparent 80%);
+            border-radius: 100px;
+            filter: blur(28px);
+            z-index: -3;
+            animation: dazzle-pulse 3.5s ease-in-out infinite alternate;
         }
+
+        /* Secondary shimmer layer */
         .header-container::after {
             content: "";
             position: absolute;
-            inset: 0.25rem 3rem;
-            border: 1px solid rgba(153, 88, 47, 0.35);
-            border-radius: 999px;
-            z-index: -1;
+            top: 50%;
+            left: 50%;
+            width: 340px;
+            height: 80px;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(90deg,
+                transparent 0%,
+                rgba(255, 255, 255, 0.35) 25%,
+                rgba(255, 255, 255, 0.55) 50%,
+                rgba(255, 255, 255, 0.35) 75%,
+                transparent 100%);
+            border-radius: 60px;
+            filter: blur(10px);
+            z-index: -2;
+            animation: shimmer-slide 4s linear infinite;
         }
+
+        @keyframes dazzle-pulse {
+            0% {
+                opacity: 0.7;
+                transform: translate(-50%, -50%) scale(1);
+            }
+            100% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1.08);
+            }
+        }
+
+        @keyframes shimmer-slide {
+            0% {
+                transform: translate(-80%, -50%);
+                opacity: 0;
+            }
+            10% {
+                opacity: 0.6;
+            }
+            90% {
+                opacity: 0.6;
+            }
+            100% {
+                transform: translate(30%, -50%);
+                opacity: 0;
+            }
+        }
+
         .dashboard-title {
+            position: relative;
             margin: 0;
-            padding: 0;
-            font-size: 2.3rem;
-            font-weight: 700;
+            padding: 0.5rem 1.5rem;
+            display: inline-block;
+            font-size: 2.5rem;
+            font-weight: 800;
             color: #111b26;
-            letter-spacing: 1.5px;
-            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
-            word-spacing: 0.1em;
+            letter-spacing: 2px;
+            text-shadow: 0 4px 16px rgba(153, 88, 47, 0.25), 0 2px 4px rgba(0, 0, 0, 0.08);
+            word-spacing: 0.12em;
+            background: linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.55) 100%);
+            border-radius: 16px;
+            border: 1px solid rgba(153, 88, 47, 0.25);
+            box-shadow: 0 8px 32px rgba(153, 88, 47, 0.18), inset 0 1px 0 rgba(255,255,255,0.6);
         }
+
         .dashboard-subtitle {
-            margin-top: 1rem;
-            font-size: 0.9rem;
+            margin-top: 1.1rem;
+            font-size: 0.95rem;
             color: #99582f;
-            letter-spacing: 0.5px;
-            font-weight: 500;
+            letter-spacing: 0.6px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .header-container::before,
+            .header-container::after {
+                animation: none;
+            }
         }
         </style>
         <div class="header-container">
