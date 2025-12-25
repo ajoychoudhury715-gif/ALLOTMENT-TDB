@@ -10,6 +10,7 @@ import re  # for creating safe keys for buttons
 import uuid  # for generating stable row IDs
 import json
 import io
+import html
 
 try:
     # Altair was previously used for a status dashboard chart.
@@ -701,6 +702,159 @@ st.markdown(
     button[key="manual_save_btn"]:active {{
         transform: translateY(0) !important;
         box-shadow: 0 2px 6px rgba(153, 88, 47, 0.3) !important;
+    }}
+
+    /* Availability dashboard styling */
+    .availability-summary {{
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1.2rem;
+        margin: 1.25rem 0 1.75rem 0;
+    }}
+
+    .availability-card {{
+        background: linear-gradient(165deg, var(--glass-bg), rgba(255,255,255,0.06));
+        border: 1px solid var(--glass-border);
+        border-radius: 18px;
+        padding: 1.25rem 1.35rem;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+        backdrop-filter: blur(14px) saturate(160%);
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+        position: relative;
+        overflow: hidden;
+    }}
+
+    .availability-card::after {{
+        content: "";
+        position: absolute;
+        inset: 1px;
+        border-radius: 16px;
+        border-top: 4px solid var(--accent);
+        opacity: 0.9;
+        pointer-events: none;
+    }}
+
+    .availability-card.success::after {{ border-top-color: var(--success); }}
+    .availability-card.warning::after {{ border-top-color: var(--warning); }}
+    .availability-card.danger::after {{ border-top-color: var(--danger); }}
+
+    .availability-card__icon {{
+        font-size: 1.8rem;
+        line-height: 1;
+    }}
+
+    .availability-card h4 {{
+        margin: 0;
+        font-size: 0.9rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+    }}
+
+    .availability-card strong {{
+        display: block;
+        font-size: 2.4rem;
+        margin: 0.1rem 0 0;
+        color: var(--text-primary);
+        letter-spacing: -0.02em;
+    }}
+
+    .availability-card p {{
+        margin: 0;
+        color: var(--text-primary);
+        opacity: 0.7;
+        font-size: 0.95rem;
+    }}
+
+    .assistant-grid {{
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+        margin-top: 1rem;
+    }}
+
+    .assistant-card {{
+        background: var(--glass-bg);
+        border: 1px solid var(--glass-border);
+        border-top: 4px solid var(--accent);
+        border-radius: 14px;
+        padding: 0.9rem 1rem;
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+        min-height: 150px;
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+    }}
+
+    .assistant-card.status-free {{ border-top-color: var(--success); }}
+    .assistant-card.status-busy {{ border-top-color: var(--warning); }}
+    .assistant-card.status-blocked {{ border-top-color: var(--danger); }}
+    .assistant-card.status-unknown {{ border-top-color: var(--info); }}
+
+    .assistant-card__header {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+    }}
+
+    .assistant-card__name {{
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: var(--text-primary);
+    }}
+
+    .assistant-card__status-pill {{
+        font-size: 0.75rem;
+        padding: 0.15rem 0.6rem;
+        border-radius: 999px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }}
+
+    .assistant-card__status-pill.success {{
+        background: rgba(16, 185, 129, 0.15);
+        color: var(--success);
+    }}
+
+    .assistant-card__status-pill.warning {{
+        background: rgba(245, 158, 11, 0.18);
+        color: var(--warning);
+    }}
+
+    .assistant-card__status-pill.danger {{
+        background: rgba(239, 68, 68, 0.18);
+        color: var(--danger);
+    }}
+
+    .assistant-card__status-pill.info {{
+        background: rgba(59, 130, 246, 0.18);
+        color: var(--info);
+    }}
+
+    .assistant-card__details {{
+        font-size: 0.9rem;
+        color: var(--text-primary);
+        opacity: 0.85;
+    }}
+
+    .assistant-card__meta {{
+        margin-top: auto;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-secondary);
+        display: flex;
+        justify-content: space-between;
+    }}
+
+    @media (max-width: 768px) {{
+        .assistant-grid {{
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        }}
     }}
     </style>
     """,
@@ -1509,9 +1663,30 @@ def get_current_assistant_status(df_schedule: pd.DataFrame) -> dict:
     status = {}
     current_time = time(now.hour, now.minute)
     current_min = now.hour * 60 + now.minute
+    today_weekday = now.weekday()
+    weekday_name_list = globals().get("weekday_names", [])
+    weekday_label = (
+        weekday_name_list[today_weekday]
+        if isinstance(weekday_name_list, list) and 0 <= today_weekday < len(weekday_name_list)
+        else now.strftime("%A")
+    )
+    weekly_off_set = {
+        str(name).strip().upper()
+        for name in WEEKLY_OFF.get(today_weekday, [])
+        if str(name).strip()
+    }
     
     for assistant in ALL_ASSISTANTS:
         assist_upper = assistant.upper()
+
+        # Weekly off overrides all other availability states
+        if assist_upper in weekly_off_set:
+            status[assist_upper] = {
+                "status": "BLOCKED",
+                "reason": f"Weekly off ({weekday_label})",
+                "department": get_department_for_assistant(assist_upper),
+            }
+            continue
         
         # Check if blocked
         is_blocked, block_reason = is_assistant_blocked(assist_upper, current_time)
@@ -1560,6 +1735,99 @@ def get_current_assistant_status(df_schedule: pd.DataFrame) -> dict:
             }
     
     return status
+
+
+STATUS_BADGES = {
+    "FREE": {"label": "Free", "emoji": "🟢", "pill": "success", "card_class": "status-free", "default_detail": "Ready for assignment"},
+    "BUSY": {"label": "Busy", "emoji": "🔴", "pill": "warning", "card_class": "status-busy", "default_detail": "In procedure"},
+    "BLOCKED": {"label": "Blocked", "emoji": "🚫", "pill": "danger", "card_class": "status-blocked", "default_detail": "Unavailable"},
+    "UNKNOWN": {"label": "Unknown", "emoji": "❔", "pill": "info", "card_class": "status-unknown", "default_detail": "No schedule"},
+}
+
+
+def _render_availability_summary(total: int, free: int, busy: int, blocked: int) -> None:
+    cards = [
+        {"title": "Total Assistants", "value": total, "caption": "Rostered today", "variant": "", "icon": "👥"},
+        {"title": "Free", "value": free, "caption": "Ready for allocation", "variant": "success", "icon": "🟢"},
+        {"title": "Busy", "value": busy, "caption": "Currently chairside", "variant": "warning", "icon": "🔴"},
+        {"title": "Blocked", "value": blocked, "caption": "Weekly off / hold", "variant": "danger", "icon": "🚫"},
+    ]
+    html_parts = ["<div class='availability-summary'>"]
+    for card in cards:
+        variant_cls = f" {card['variant']}" if card["variant"] else ""
+        html_parts.append(
+            f"""
+            <div class="availability-card{variant_cls}">
+                <span class="availability-card__icon">{card['icon']}</span>
+                <h4>{html.escape(card['title'])}</h4>
+                <strong>{card['value']}</strong>
+                <p>{html.escape(card['caption'])}</p>
+            </div>
+            """
+        )
+    html_parts.append("</div>")
+    st.markdown("\n".join(html_parts), unsafe_allow_html=True)
+
+
+def _render_assistant_cards(card_entries: list[dict]) -> None:
+    if not card_entries:
+        st.info("No assistants match the selected filters.")
+        return
+
+    html_parts = ["<div class='assistant-grid'>"]
+    for entry in card_entries:
+        assistant_name = html.escape(str(entry.get("name", "Assistant")))
+        info = entry.get("info", {}) or {}
+        status_raw = str(info.get("status", "UNKNOWN")).upper()
+        meta = STATUS_BADGES.get(status_raw, STATUS_BADGES["UNKNOWN"])
+        pill_cls = meta.get("pill", "info")
+        card_cls = meta.get("card_class", "status-unknown")
+
+        reason = str(info.get("reason", "")).strip()
+        patient = str(info.get("patient", "")).strip()
+        doctor = str(info.get("doctor", "")).strip()
+        op_room = str(info.get("op", "")).strip()
+        department = str(info.get("department", "")) or "—"
+
+        detail_lines: list[str] = []
+        if status_raw == "BUSY" and patient:
+            detail_lines.append(f"With {patient}")
+        elif reason:
+            detail_lines.append(reason)
+        else:
+            detail_lines.append(meta.get("default_detail", ""))
+
+        if doctor:
+            if status_raw == "BUSY":
+                detail_lines.append(f"Doctor {doctor}")
+            elif not patient:
+                detail_lines.append(f"Doctor {doctor}")
+
+        if op_room:
+            detail_lines.append(f"OP {op_room}")
+
+        detail_html = "<br/>".join(html.escape(line) for line in detail_lines if line)
+        dept_html = html.escape(department)
+        op_html = html.escape(op_room or "—")
+
+        html_parts.append(
+            f"""
+            <div class="assistant-card {card_cls}">
+                <div class="assistant-card__header">
+                    <div class="assistant-card__name">{assistant_name}</div>
+                    <span class="assistant-card__status-pill {pill_cls}">{meta['emoji']} {meta['label']}</span>
+                </div>
+                <div class="assistant-card__details">{detail_html}</div>
+                <div class="assistant-card__meta">
+                    <span>Dept • {dept_html}</span>
+                    <span>OP • {op_html}</span>
+                </div>
+            </div>
+            """
+        )
+
+    html_parts.append("</div>")
+    st.markdown("\n".join(html_parts), unsafe_allow_html=True)
 
 # --- Reminder settings in sidebar ---
 with st.sidebar:
@@ -4140,73 +4408,104 @@ st.markdown("### 👥 Assistant Availability Dashboard")
 # Get current status of all assistants
 assistant_status = get_current_assistant_status(df)
 
+assistant_entries: list[dict] = []
+for assistant in ALL_ASSISTANTS:
+    raw_name = assistant.strip().upper()
+    info = dict(assistant_status.get(raw_name, {}))
+    if not info:
+        info = {"status": "UNKNOWN", "reason": "No schedule"}
+    if not info.get("department"):
+        info["department"] = get_department_for_assistant(raw_name)
+    if not info.get("status"):
+        info["status"] = "UNKNOWN"
+    assistant_entries.append({
+        "name": assistant.title(),
+        "raw_name": raw_name,
+        "info": info,
+    })
+
+assistant_lookup = {entry["raw_name"]: entry for entry in assistant_entries}
+
 # Create tabs for each department
 dept_tabs = st.tabs(["📊 All Assistants", "🦷 PROSTO Department", "🔬 ENDO Department"])
 
 with dept_tabs[0]:
-    # Summary cards
-    free_count = sum(1 for s in assistant_status.values() if s["status"] == "FREE")
-    busy_count = sum(1 for s in assistant_status.values() if s["status"] == "BUSY")
-    blocked_count = sum(1 for s in assistant_status.values() if s["status"] == "BLOCKED")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Assistants", len(assistant_status))
-    with col2:
-        st.metric("🟢 Free", free_count)
-    with col3:
-        st.metric("🔴 Busy", busy_count)
-    with col4:
-        st.metric("🚫 Blocked", blocked_count)
-    
-    # Status table
-    status_data = []
-    for name, info in sorted(assistant_status.items()):
-        status_emoji = "🟢" if info["status"] == "FREE" else ("🔴" if info["status"] == "BUSY" else "🚫")
-        status_data.append({
-            "Status": status_emoji,
-            "Assistant": name,
-            "Department": info.get("department", ""),
-            "Current Status": info["status"],
-            "Details": info.get("reason", "")
-        })
-    
-    if status_data:
-        st.dataframe(pd.DataFrame(status_data), use_container_width=True, hide_index=True)
+    total_count = len(assistant_entries)
+    free_count = sum(1 for entry in assistant_entries if str(entry["info"].get("status")).upper() == "FREE")
+    busy_count = sum(1 for entry in assistant_entries if str(entry["info"].get("status")).upper() == "BUSY")
+    blocked_count = sum(1 for entry in assistant_entries if str(entry["info"].get("status")).upper() == "BLOCKED")
+
+    _render_availability_summary(total_count, free_count, busy_count, blocked_count)
+
+    status_label_map = {
+        "FREE": "🟢 Free",
+        "BUSY": "🔴 Busy",
+        "BLOCKED": "🚫 Blocked",
+        "UNKNOWN": "❔ Unknown",
+    }
+    filter_options = list(status_label_map.keys())
+    default_filter = [opt for opt in filter_options if opt != "UNKNOWN"]
+    selected_statuses = st.multiselect(
+        "Show statuses",
+        options=filter_options,
+        default=default_filter,
+        format_func=lambda x: status_label_map.get(x, x.title()),
+        key="assistant_status_filter",
+    )
+    st.caption("Use the filter to focus on assistants who are free, busy, or currently blocked.")
+
+    if selected_statuses:
+        filtered_entries = [entry for entry in assistant_entries if str(entry["info"].get("status", "UNKNOWN")).upper() in selected_statuses]
+    else:
+        filtered_entries = assistant_entries
+
+    _render_assistant_cards(filtered_entries)
 
 with dept_tabs[1]:
     st.markdown("**PROSTO Department Assistants**")
-    prosto_assistants = DEPARTMENTS["PROSTO"]["assistants"]
-    
-    for assistant in prosto_assistants:
-        assist_upper = assistant.upper()
-        info = assistant_status.get(assist_upper, {"status": "UNKNOWN", "reason": ""})
-        
-        if info["status"] == "FREE":
-            st.success(f"🟢 **{assistant}** - Available")
-        elif info["status"] == "BUSY":
-            st.warning(f"🔴 **{assistant}** - {info.get('reason', 'Busy')}")
-        elif info["status"] == "BLOCKED":
-            st.error(f"🚫 **{assistant}** - Blocked: {info.get('reason', '')}")
-        else:
-            st.info(f"❓ **{assistant}** - Status unknown")
+    prosto_entries: list[dict] = []
+    for assistant in DEPARTMENTS["PROSTO"]["assistants"]:
+        entry = assistant_lookup.get(assistant.upper())
+        if entry is None:
+            fallback_info = {
+                "status": "UNKNOWN",
+                "reason": "No schedule",
+                "department": "PROSTO",
+            }
+            entry = {"name": assistant.title(), "raw_name": assistant.upper(), "info": fallback_info}
+        prosto_entries.append(entry)
+
+    prosto_counts: dict[str, int] = {}
+    for entry in prosto_entries:
+        status_key = str(entry["info"].get("status", "UNKNOWN")).upper()
+        prosto_counts[status_key] = prosto_counts.get(status_key, 0) + 1
+    st.caption(
+        f"🟢 {prosto_counts.get('FREE', 0)} free · 🔴 {prosto_counts.get('BUSY', 0)} busy · 🚫 {prosto_counts.get('BLOCKED', 0)} blocked"
+    )
+    _render_assistant_cards(prosto_entries)
 
 with dept_tabs[2]:
     st.markdown("**ENDO Department Assistants**")
-    endo_assistants = DEPARTMENTS["ENDO"]["assistants"]
-    
-    for assistant in endo_assistants:
-        assist_upper = assistant.upper()
-        info = assistant_status.get(assist_upper, {"status": "UNKNOWN", "reason": ""})
-        
-        if info["status"] == "FREE":
-            st.success(f"🟢 **{assistant}** - Available")
-        elif info["status"] == "BUSY":
-            st.warning(f"🔴 **{assistant}** - {info.get('reason', 'Busy')}")
-        elif info["status"] == "BLOCKED":
-            st.error(f"🚫 **{assistant}** - Blocked: {info.get('reason', '')}")
-        else:
-            st.info(f"❓ **{assistant}** - Status unknown")
+    endo_entries: list[dict] = []
+    for assistant in DEPARTMENTS["ENDO"]["assistants"]:
+        entry = assistant_lookup.get(assistant.upper())
+        if entry is None:
+            fallback_info = {
+                "status": "UNKNOWN",
+                "reason": "No schedule",
+                "department": "ENDO",
+            }
+            entry = {"name": assistant.title(), "raw_name": assistant.upper(), "info": fallback_info}
+        endo_entries.append(entry)
+
+    endo_counts: dict[str, int] = {}
+    for entry in endo_entries:
+        status_key = str(entry["info"].get("status", "UNKNOWN")).upper()
+        endo_counts[status_key] = endo_counts.get(status_key, 0) + 1
+    st.caption(
+        f"🟢 {endo_counts.get('FREE', 0)} free · 🔴 {endo_counts.get('BUSY', 0)} busy · 🚫 {endo_counts.get('BLOCKED', 0)} blocked"
+    )
+    _render_assistant_cards(endo_entries)
 # ================ AUTOMATIC ASSISTANT ALLOCATION ================
 with st.expander("🔄 Automatic Assistant Allocation", expanded=False):
     st.caption("Automatically assign assistants based on department, doctor, and availability")
