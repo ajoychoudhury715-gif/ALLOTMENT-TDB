@@ -2000,22 +2000,48 @@ STATUS_BADGES = {
 
 
 def _render_availability_summary(total: int, free: int, busy: int, blocked: int) -> None:
+    # Map variant to actual color values from COLORS dictionary
+    variant_colors = {
+        "": COLORS["accent"],
+        "success": COLORS["success"],
+        "warning": COLORS["warning"],
+        "danger": COLORS["danger"],
+    }
+    
     cards = [
         {"title": "Total Assistants", "value": total, "caption": "Rostered today", "variant": "", "icon": "👥"},
         {"title": "Free", "value": free, "caption": "Ready for allocation", "variant": "success", "icon": "🟢"},
         {"title": "Busy", "value": busy, "caption": "Currently chairside", "variant": "warning", "icon": "🔴"},
         {"title": "Blocked", "value": blocked, "caption": "Weekly off / hold", "variant": "danger", "icon": "🚫"},
     ]
-    html_parts = ["<div class='availability-summary'>"]
+    
+    # Build inline styles for proper rendering
+    html_parts = [f"""<div style="
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1.2rem;
+        margin: 1.25rem 0 1.75rem 0;
+    ">"""]
+    
     for card in cards:
-        variant_cls = f" {card['variant']}" if card["variant"] else ""
+        border_color = variant_colors.get(card["variant"], COLORS["accent"])
         html_parts.append(
             f"""
-            <div class="availability-card{variant_cls}">
-                <span class="availability-card__icon">{card['icon']}</span>
-                <h4>{html.escape(card['title'])}</h4>
-                <strong>{card['value']}</strong>
-                <p>{html.escape(card['caption'])}</p>
+            <div style="
+                background: {COLORS['glass_bg']};
+                border: 1px solid {COLORS['glass_border']};
+                border-top: 4px solid {border_color};
+                border-radius: 18px;
+                padding: 1.25rem 1.35rem;
+                box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+                display: flex;
+                flex-direction: column;
+                gap: 0.55rem;
+            ">
+                <span style="font-size: 1.8rem; line-height: 1;">{card['icon']}</span>
+                <h4 style="margin: 0; font-size: 0.9rem; letter-spacing: 0.08em; text-transform: uppercase; color: {COLORS['text_secondary']};">{html.escape(card['title'])}</h4>
+                <strong style="display: block; font-size: 2.4rem; margin: 0.1rem 0 0; color: {COLORS['text_primary']}; letter-spacing: -0.02em;">{card['value']}</strong>
+                <p style="margin: 0; color: {COLORS['text_primary']}; opacity: 0.7; font-size: 0.95rem;">{html.escape(card['caption'])}</p>
             </div>
             """
         )
@@ -2029,15 +2055,37 @@ def _render_assistant_cards(card_entries: list[dict[str, Any]]) -> None:
         st.info("No assistants match the selected filters.")
         return
 
-    cards_html: list[str] = ["<div class='assistant-grid'>"]
+    # Map status to colors
+    status_colors = {
+        "FREE": COLORS["success"],
+        "BUSY": COLORS["warning"],
+        "BLOCKED": COLORS["danger"],
+        "UNKNOWN": COLORS["info"],
+    }
+    
+    pill_bg_colors = {
+        "FREE": f"rgba({int(COLORS['success'][1:3], 16)}, {int(COLORS['success'][3:5], 16)}, {int(COLORS['success'][5:7], 16)}, 0.2)",
+        "BUSY": f"rgba({int(COLORS['warning'][1:3], 16)}, {int(COLORS['warning'][3:5], 16)}, {int(COLORS['warning'][5:7], 16)}, 0.2)",
+        "BLOCKED": f"rgba({int(COLORS['danger'][1:3], 16)}, {int(COLORS['danger'][3:5], 16)}, {int(COLORS['danger'][5:7], 16)}, 0.2)",
+        "UNKNOWN": f"rgba({int(COLORS['info'][1:3], 16)}, {int(COLORS['info'][3:5], 16)}, {int(COLORS['info'][5:7], 16)}, 0.2)",
+    }
+
+    cards_html: list[str] = [f"""<div style="
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+        margin-top: 1rem;
+    ">"""]
 
     for entry in card_entries:
         assistant_name = html.escape(str(entry.get("name", "Assistant")))
         info = entry.get("info", {}) or {}
         status_raw = str(info.get("status", "UNKNOWN")).upper()
         meta = STATUS_BADGES.get(status_raw, STATUS_BADGES["UNKNOWN"])
-        pill_cls = meta.get("pill", "info")
-        card_cls = meta.get("card_class", "status-unknown")
+        
+        border_color = status_colors.get(status_raw, COLORS["accent"])
+        pill_bg = pill_bg_colors.get(status_raw, "rgba(59, 130, 246, 0.2)")
+        pill_color = status_colors.get(status_raw, COLORS["info"])
 
         reason = str(info.get("reason", "")).strip()
         patient = str(info.get("patient", "")).strip()
@@ -2064,28 +2112,41 @@ def _render_assistant_cards(card_entries: list[dict[str, Any]]) -> None:
         op_html = html.escape(op_room or "—")
 
         cards_html.append(
-            (
-                "<div class=\"assistant-card {card_cls}\">"
-                "<div class=\"assistant-card__header\">"
-                "<div class=\"assistant-card__name\">{assistant_name}</div>"
-                "<span class=\"assistant-card__status-pill {pill_cls}\">{emoji} {label}</span>"
-                "</div>"
-                "<div class=\"assistant-card__details\">{detail_html}</div>"
-                "<div class=\"assistant-card__meta\">"
-                "<span>Dept • {dept_html}</span>"
-                "<span>OP • {op_html}</span>"
-                "</div>"
-                "</div>"
-            ).format(
-                card_cls=card_cls,
-                assistant_name=assistant_name,
-                pill_cls=pill_cls,
-                emoji=meta["emoji"],
-                label=meta["label"],
-                detail_html=detail_html,
-                dept_html=dept_html,
-                op_html=op_html,
-            )
+            f"""
+            <div style="
+                background: {COLORS['glass_bg']};
+                border: 1px solid {COLORS['glass_border']};
+                border-top: 4px solid {border_color};
+                border-radius: 14px;
+                padding: 1rem 1.1rem;
+                box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+                min-height: 140px;
+                display: flex;
+                flex-direction: column;
+                gap: 0.5rem;
+            ">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.25rem;">
+                    <div style="font-size: 1.1rem; font-weight: 700; color: {COLORS['text_primary']}; letter-spacing: 0.02em;">{assistant_name}</div>
+                    <span style="
+                        font-size: 0.7rem;
+                        padding: 0.2rem 0.65rem;
+                        border-radius: 999px;
+                        text-transform: uppercase;
+                        letter-spacing: 0.06em;
+                        font-weight: 600;
+                        white-space: nowrap;
+                        background: {pill_bg};
+                        color: {pill_color};
+                        border: 1px solid {pill_color}40;
+                    ">{meta['emoji']} {meta['label']}</span>
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['text_primary']}; opacity: 0.9; line-height: 1.4; flex-grow: 1;">{detail_html}</div>
+                <div style="margin-top: auto; padding-top: 0.5rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: {COLORS['text_secondary']}; opacity: 0.8; display: flex; justify-content: space-between; border-top: 1px solid {COLORS['glass_border']};">
+                    <span>Dept • {dept_html}</span>
+                    <span>OP • {op_html}</span>
+                </div>
+            </div>
+            """
         )
 
     cards_html.append("</div>")
