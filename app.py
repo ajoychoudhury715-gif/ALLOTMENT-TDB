@@ -2542,6 +2542,36 @@ if "meta" not in df_raw.attrs:
 # Load persisted time blocks (if present) from storage metadata
 _sync_time_blocks_from_meta(df_raw)
 
+# ================ ASSISTANTS WEEKLY OFF DISPLAY (MAIN CONTENT) ================
+# Show a prominent banner for today's weekly off assistants at the top of the page
+_today_off_display = WEEKLY_OFF.get(now.weekday(), [])
+if _today_off_display:
+    _off_names_display = ", ".join(_today_off_display)
+    st.markdown(
+        f"""
+        <div style="
+            background: linear-gradient(135deg, {COLORS['danger']}15, {COLORS['warning']}10);
+            border: 1px solid {COLORS['danger']}40;
+            border-left: 4px solid {COLORS['danger']};
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin: 10px 0 16px 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        ">
+            <span style="font-size: 1.4em;">🚫</span>
+            <div>
+                <strong style="color: {COLORS['text_primary']};">Weekly Off Today ({now.strftime('%A')})</strong>
+                <div style="color: {COLORS['text_secondary']}; margin-top: 2px;">
+                    <strong>{_off_names_display}</strong> — Cannot be allocated today
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 # Ensure expected columns exist (backfills older data/backends)
 for _col in _get_expected_columns():
     if _col in df_raw.columns:
@@ -3327,36 +3357,6 @@ def highlight_row(row):
     return [color for _ in row]
 
 all_sorted = df
-
-# ================ ASSISTANTS WEEKLY OFF DISPLAY (MAIN CONTENT) ================
-# Show a compact banner for today's weekly off assistants
-today_off_main = WEEKLY_OFF.get(now.weekday(), [])
-if today_off_main:
-    off_names = ", ".join(today_off_main)
-    st.markdown(
-        f"""
-        <div style="
-            background: linear-gradient(135deg, {COLORS['danger']}15, {COLORS['warning']}10);
-            border: 1px solid {COLORS['danger']}40;
-            border-left: 4px solid {COLORS['danger']};
-            border-radius: 8px;
-            padding: 12px 16px;
-            margin: 10px 0 16px 0;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        ">
-            <span style="font-size: 1.4em;">🚫</span>
-            <div>
-                <strong style="color: {COLORS['text_primary']};">Weekly Off Today ({now.strftime('%A')})</strong>
-                <div style="color: {COLORS['text_secondary']}; margin-top: 2px;">
-                    <strong>{off_names}</strong> — Cannot be allocated today
-                </div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
 
 # Manual save button and patient controls for schedule editor
 st.markdown("### 📋 Full Schedule")
