@@ -783,11 +783,6 @@ st.markdown(f"""
     }}
     </style>
     <div class="sticky-top">
-        <div class="header-container">
-            <div class="dashboard-title">ALLOTMENT DASHBOARD</div>
-            <div class="dashboard-subtitle">Real-time Scheduling Management System</div>
-        </div>
-        <div class="divider-line"></div>
         <div class="date-line">{date_line_str} IST</div>
     </div>
 """, unsafe_allow_html=True)
