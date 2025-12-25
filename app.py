@@ -719,12 +719,29 @@ with col_title:
     st.markdown("""
         <style>
         .header-container {
+            position: relative;
             padding: 1.5rem 0;
-            background: transparent;
-            border-radius: 0;
-            border: none;
-            box-shadow: none;
             text-align: center;
+            color: #111b26;
+            overflow: hidden;
+        }
+        .header-container::before {
+            content: "";
+            position: absolute;
+            inset: -0.5rem 2.5rem;
+            background: linear-gradient(120deg, rgba(153, 88, 47, 0.22), rgba(201, 187, 176, 0.18));
+            border-radius: 60px;
+            filter: blur(12px);
+            opacity: 0.85;
+            z-index: -2;
+        }
+        .header-container::after {
+            content: "";
+            position: absolute;
+            inset: 0.25rem 3rem;
+            border: 1px solid rgba(153, 88, 47, 0.35);
+            border-radius: 999px;
+            z-index: -1;
         }
         .dashboard-title {
             margin: 0;
