@@ -857,14 +857,10 @@ DEPARTMENTS = {
             "RESHMA",
         ]),
         "allocation_rules": {
-            # Doctor-specific and time-based allocation rules
-            # Format: {role: {doctor: [assistants in order], "default": [assistants in order]}}
+            # FIRST: Anshika primarily (with fallbacks)
+            # Time overrides: Archana after 1pm, Shakshi after 3:30pm
             "FIRST": {
-                "DR.HUSSAIN": ["RAJA", "NITIN", "ANSHIKA", "RESHMA", "PRAMOTH", "BABU"],
-                "DR.HUSAIN": ["RAJA", "NITIN", "ANSHIKA", "RESHMA", "PRAMOTH", "BABU"],
-                "DR.SHIFA": ["RESHMA", "PRAMOTH", "ANSHIKA", "RAJA", "NITIN", "BABU"],
                 "default": ["ANSHIKA", "RAJA", "NITIN", "RESHMA", "PRAMOTH", "BABU"],
-                # Time overrides: if after this hour, use this assistant for FIRST
                 "time_override": [(13, "ARCHANA"), (15.5, "SHAKSHI")]
             },
             "SECOND": {
