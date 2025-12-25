@@ -858,8 +858,9 @@ DEPARTMENTS = {
         ]),
         "allocation_rules": {
             # Time-based allocation (in 24-hour format): {role: [(start_hour, assistant), ...]}
-            "FIRST": [(0, "RAJA"), (13, "ARCHANA"), (15.5, "SHAKSHI")],  # After 1pm = Archana, after 3:30pm = Shakshi
-            "SECOND": [(0, "NITIN"), (13, "ANSHIKA"), (15.5, "BABU")],
+            # FIRST: Archana after 1pm, Shakshi after 3:30pm
+            "FIRST": [(0, "RAJA"), (13, "ARCHANA"), (15.5, "SHAKSHI")],
+            "SECOND": [(0, "NITIN"), (0, "ANSHIKA"), (0, "BABU")],
         }
     },
     "ENDO": {
@@ -882,9 +883,12 @@ DEPARTMENTS = {
         ]),
         "allocation_rules": {
             # Time-based allocation: Primary preferences for FIRST, SECOND, THIRD by time
-            "FIRST": [(0, "ANYA"), (12, "LAVANYA"), (12, "ROHINI")],  # After 12pm, use Anya/Lavanya/Rohini
-            "SECOND": [(0, "MUKHILA"), (0, "SHAKSHI"), (0, "ARCHANA")],  # Mukhila, Shakshi, Archana
-            "THIRD": [(0, "ROHINI"), (0, "SHAKSHI"), (0, "ARCHANA"), (0, "MUKHILA")],  # If available
+            # FIRST: Anya after 12pm, then Lavanya, Rohini
+            "FIRST": [(0, "LAVANYA"), (0, "ROHINI"), (12, "ANYA")],
+            # SECOND: Mukhila, Shakshi, Archana, Rohini
+            "SECOND": [(0, "MUKHILA"), (0, "SHAKSHI"), (0, "ARCHANA"), (0, "ROHINI")],
+            # THIRD: Rohini, Shakshi, Archana, Mukhila (if available)
+            "THIRD": [(0, "ROHINI"), (0, "SHAKSHI"), (0, "ARCHANA"), (0, "MUKHILA")],
         }
     },
 }
