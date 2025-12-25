@@ -891,8 +891,8 @@ DEPARTMENTS = {
         "allocation_rules": {
             # Doctor-specific and time-based allocation for ENDO
             "FIRST": {
-                # DR. NIMAI: Archana, Reshma, Mukhila, Rohini
-                "DR.NIMAI": ["ARCHANA", "RESHMA", "MUKHILA", "ROHINI", "ANYA", "LAVANYA"],
+                # DR. NIMAI: Archana only (if not available, use first available from department)
+                "DR.NIMAI": ["ARCHANA"],
                 # Default: Anya after 12pm, then Lavanya, Rohini
                 "default": ["LAVANYA", "ROHINI", "ANYA"],
                 "time_override": [(12, "ANYA")]
