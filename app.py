@@ -1997,11 +1997,13 @@ def _render_availability_summary(total: int, free: int, busy: int, blocked: int)
 
 
 def _render_assistant_cards(card_entries: list[dict[str, any]]) -> None:
+    """Render assistant cards with clean HTML (avoids stray text like "< /div>")."""
     if not card_entries:
         st.info("No assistants match the selected filters.")
         return
 
-    html_parts = ["<div class='assistant-grid'>"]
+    cards_html: list[str] = ["<div class='assistant-grid'>"]
+
     for entry in card_entries:
         assistant_name = html.escape(str(entry.get("name", "Assistant")))
         info = entry.get("info", {}) or {}
@@ -2024,11 +2026,8 @@ def _render_assistant_cards(card_entries: list[dict[str, any]]) -> None:
         else:
             detail_lines.append(meta.get("default_detail", ""))
 
-        if doctor:
-            if status_raw == "BUSY":
-                detail_lines.append(f"Doctor {doctor}")
-            elif not patient:
-                detail_lines.append(f"Doctor {doctor}")
+        if doctor and (status_raw == "BUSY" or not patient):
+            detail_lines.append(f"Doctor {doctor}")
 
         if op_room:
             detail_lines.append(f"OP {op_room}")
@@ -2037,24 +2036,33 @@ def _render_assistant_cards(card_entries: list[dict[str, any]]) -> None:
         dept_html = html.escape(department)
         op_html = html.escape(op_room or "—")
 
-        html_parts.append(
-            f"""
-            <div class="assistant-card {card_cls}">
-                <div class="assistant-card__header">
-                    <div class="assistant-card__name">{assistant_name}</div>
-                    <span class="assistant-card__status-pill {pill_cls}">{meta['emoji']} {meta['label']}</span>
-                </div>
-                <div class="assistant-card__details">{detail_html}</div>
-                <div class="assistant-card__meta">
-                    <span>Dept • {dept_html}</span>
-                    <span>OP • {op_html}</span>
-                </div>
-            </div>
-            """
+        cards_html.append(
+            (
+                "<div class=\"assistant-card {card_cls}\">"
+                "<div class=\"assistant-card__header\">"
+                "<div class=\"assistant-card__name\">{assistant_name}</div>"
+                "<span class=\"assistant-card__status-pill {pill_cls}\">{emoji} {label}</span>"
+                "</div>"
+                "<div class=\"assistant-card__details\">{detail_html}</div>"
+                "<div class=\"assistant-card__meta\">"
+                "<span>Dept • {dept_html}</span>"
+                "<span>OP • {op_html}</span>"
+                "</div>"
+                "</div>"
+            ).format(
+                card_cls=card_cls,
+                assistant_name=assistant_name,
+                pill_cls=pill_cls,
+                emoji=meta["emoji"],
+                label=meta["label"],
+                detail_html=detail_html,
+                dept_html=dept_html,
+                op_html=op_html,
+            )
         )
 
-    html_parts.append("</div>")
-    st.markdown("\n".join(html_parts), unsafe_allow_html=True)
+    cards_html.append("</div>")
+    st.markdown("\n".join(cards_html), unsafe_allow_html=True)
 
 # --- Reminder settings in sidebar ---
 with st.sidebar:
