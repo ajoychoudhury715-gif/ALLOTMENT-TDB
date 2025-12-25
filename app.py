@@ -4491,6 +4491,7 @@ else:
 
 # ================ ASSISTANT AVAILABILITY DASHBOARD ================
 st.markdown("### 👥 Assistant Availability Dashboard")
+st.markdown("---")
 
 # Get current status of all assistants
 assistant_status = get_current_assistant_status(df)
@@ -4517,6 +4518,8 @@ assistant_lookup = {entry["raw_name"]: entry for entry in assistant_entries}
 dept_tabs = st.tabs(["📊 All Assistants", "🦷 PROSTO Department", "🔬 ENDO Department"])
 
 with dept_tabs[0]:
+    st.markdown("#### Overview")
+    
     total_count = len(assistant_entries)
     free_count = sum(1 for entry in assistant_entries if str(entry["info"].get("status")).upper() == "FREE")
     busy_count = sum(1 for entry in assistant_entries if str(entry["info"].get("status")).upper() == "BUSY")
@@ -4524,6 +4527,7 @@ with dept_tabs[0]:
 
     _render_availability_summary(total_count, free_count, busy_count, blocked_count)
 
+    st.markdown("#### Filter Assistants")
     status_label_map = {
         "FREE": "🟢 Free",
         "BUSY": "🔴 Busy",
@@ -4539,17 +4543,21 @@ with dept_tabs[0]:
         format_func=lambda x: status_label_map.get(x, x.title()),
         key="assistant_status_filter",
     )
-    st.caption("Use the filter to focus on assistants who are free, busy, or currently blocked.")
+    st.caption("💡 Use the filter to focus on assistants who are free, busy, or currently blocked.")
 
     if selected_statuses:
         filtered_entries = [entry for entry in assistant_entries if str(entry["info"].get("status", "UNKNOWN")).upper() in selected_statuses]
     else:
         filtered_entries = assistant_entries
 
-    _render_assistant_cards(filtered_entries)
+    if filtered_entries:
+        st.markdown(f"#### Showing {len(filtered_entries)} Assistant{'s' if len(filtered_entries) != 1 else ''}")
+        _render_assistant_cards(filtered_entries)
+    else:
+        st.info("No assistants match the selected filters.")
 
 with dept_tabs[1]:
-    st.markdown("**PROSTO Department Assistants**")
+    st.markdown("#### PROSTO Department Assistants")
     prosto_entries: list[dict] = []
     for assistant in DEPARTMENTS["PROSTO"]["assistants"]:
         entry = assistant_lookup.get(assistant.upper())
@@ -4566,13 +4574,19 @@ with dept_tabs[1]:
     for entry in prosto_entries:
         status_key = str(entry["info"].get("status", "UNKNOWN")).upper()
         prosto_counts[status_key] = prosto_counts.get(status_key, 0) + 1
-    st.caption(
-        f"🟢 {prosto_counts.get('FREE', 0)} free · 🔴 {prosto_counts.get('BUSY', 0)} busy · 🚫 {prosto_counts.get('BLOCKED', 0)} blocked"
-    )
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("🟢 Free", prosto_counts.get('FREE', 0))
+    with col2:
+        st.metric("🔴 Busy", prosto_counts.get('BUSY', 0))
+    with col3:
+        st.metric("🚫 Blocked", prosto_counts.get('BLOCKED', 0))
+    
     _render_assistant_cards(prosto_entries)
 
 with dept_tabs[2]:
-    st.markdown("**ENDO Department Assistants**")
+    st.markdown("#### ENDO Department Assistants")
     endo_entries: list[dict] = []
     for assistant in DEPARTMENTS["ENDO"]["assistants"]:
         entry = assistant_lookup.get(assistant.upper())
@@ -4589,9 +4603,15 @@ with dept_tabs[2]:
     for entry in endo_entries:
         status_key = str(entry["info"].get("status", "UNKNOWN")).upper()
         endo_counts[status_key] = endo_counts.get(status_key, 0) + 1
-    st.caption(
-        f"🟢 {endo_counts.get('FREE', 0)} free · 🔴 {endo_counts.get('BUSY', 0)} busy · 🚫 {endo_counts.get('BLOCKED', 0)} blocked"
-    )
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("🟢 Free", endo_counts.get('FREE', 0))
+    with col2:
+        st.metric("🔴 Busy", endo_counts.get('BUSY', 0))
+    with col3:
+        st.metric("🚫 Blocked", endo_counts.get('BLOCKED', 0))
+    
     _render_assistant_cards(endo_entries)
 # ================ AUTOMATIC ASSISTANT ALLOCATION ================
 with st.expander("🔄 Automatic Assistant Allocation", expanded=False):
