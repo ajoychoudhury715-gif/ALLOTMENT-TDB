@@ -3092,6 +3092,8 @@ if st.session_state.get("unsaved_df") is not None:
 df_raw.columns = [col.strip() for col in df_raw.columns]
 
 # Ensure metadata attribute exists (defensive check)
+
+# Ensure metadata attribute exists (defensive check)
 if not hasattr(df_raw, 'attrs'):
     df_raw.attrs = {}
 if "meta" not in df_raw.attrs:
@@ -3099,6 +3101,37 @@ if "meta" not in df_raw.attrs:
 
 # Load persisted time blocks (if present) from storage metadata
 _sync_time_blocks_from_meta(df_raw)
+
+# --- AUTO-REPAIR TIME BLOCKS FORMAT ---
+def _is_time_block_valid(block):
+    # Check for required keys and correct types
+    try:
+        if not isinstance(block, dict):
+            return False
+        if not all(k in block for k in ("assistant", "date", "reason", "start_time", "end_time")):
+            return False
+        # start_time/end_time should be time or string 'HH:MM'
+        st_val = block["start_time"]
+        et_val = block["end_time"]
+        def _is_time(val):
+            from datetime import time
+            return isinstance(val, time) or (isinstance(val, str) and len(val) == 5 and val[2] == ":")
+        return _is_time(st_val) and _is_time(et_val)
+    except Exception:
+        return False
+
+meta = df_raw.attrs.get("meta", {})
+blocks = meta.get("time_blocks", [])
+if not isinstance(blocks, list) or not all(_is_time_block_valid(b) for b in blocks):
+    # Attempt to repair by re-serializing current session_state.time_blocks
+    import streamlit as st
+    try:
+        meta = _apply_time_blocks_to_meta(meta)
+        df_raw.attrs["meta"] = meta
+        save_data(df_raw, show_toast=False, message="Auto-repaired time_blocks format")
+        _sync_time_blocks_from_meta(df_raw)
+    except Exception as e:
+        st.warning(f"[Auto-repair] Failed to repair time_blocks format: {e}")
 
 # Ensure expected columns exist (backfills older data/backends)
 for _col in _get_expected_columns():
@@ -3409,6 +3442,7 @@ with st.sidebar:
                 st.success(
                     f"✅ Blocked {block_assistant} from {block_start.strftime('%H:%M')} to {block_end.strftime('%H:%M')}"
                 )
+                st.rerun()
 
     # Show current time blocks
     if st.session_state.get("time_blocks"):
@@ -3429,6 +3463,7 @@ with st.sidebar:
                         remove_time_block(actual_idx)
                         save_data(df_raw, show_toast=True, message="Time block removed")
                         st.success("Time block removed.")
+                        st.rerun()
                     except Exception:
                         pass
         # Debug: Show raw time_blocks and meta
