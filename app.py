@@ -4708,14 +4708,36 @@ assistant_lookup = {entry["raw_name"]: entry for entry in assistant_entries}
 dept_tabs = st.tabs(["📊 All Assistants", "🦷 PROSTHO Department", "🔬 ENDO Department"])
 
 with dept_tabs[0]:
-    st.markdown("#### Overview")
-    
-    total_count = len(assistant_entries)
-    free_count = sum(1 for entry in assistant_entries if _norm_status_value(entry["info"].get("status")) == "FREE")
-    busy_count = sum(1 for entry in assistant_entries if _norm_status_value(entry["info"].get("status")) == "BUSY")
-    blocked_count = sum(1 for entry in assistant_entries if _norm_status_value(entry["info"].get("status")) == "BLOCKED")
 
-    _render_availability_summary(total_count, free_count, busy_count, blocked_count)
+    st.markdown("""
+    <div style='display: flex; align-items: center; gap: 1.5rem; margin-bottom: 1.2rem;'>
+        <div style='background: var(--glass-bg, #f5f5f5); border: 1.5px solid var(--glass-border, #c9bbb0); border-radius: 1.2rem; padding: 1.2rem 2.2rem; box-shadow: 0 2px 8px rgba(0,0,0,0.04); min-width: 220px;'>
+            <div style='font-size: 2.2rem; font-weight: 700; color: var(--text-primary, #111b26); margin-bottom: 0.2rem;'>Overview</div>
+            <div style='font-size: 1.1rem; color: var(--text-secondary, #99582f);'>Current Assistant Status</div>
+        </div>
+        <div style='display: flex; gap: 1.2rem;'>
+            <div style='background: #10b98122; border-radius: 0.8rem; padding: 0.8rem 1.4rem; text-align: center;'>
+                <div style='font-size: 1.6rem; font-weight: 600; color: #10b981;'>{free_count}</div>
+                <div style='font-size: 1rem; color: #10b981;'>🟢 Free</div>
+            </div>
+            <div style='background: #ef444422; border-radius: 0.8rem; padding: 0.8rem 1.4rem; text-align: center;'>
+                <div style='font-size: 1.6rem; font-weight: 600; color: #ef4444;'>{busy_count}</div>
+                <div style='font-size: 1rem; color: #ef4444;'>🔴 Busy</div>
+            </div>
+            <div style='background: #f59e0b22; border-radius: 0.8rem; padding: 0.8rem 1.4rem; text-align: center;'>
+                <div style='font-size: 1.6rem; font-weight: 600; color: #f59e0b;'>{blocked_count}</div>
+                <div style='font-size: 1rem; color: #f59e0b;'>🚫 Blocked</div>
+            </div>
+            <div style='background: #c9bbb022; border-radius: 0.8rem; padding: 0.8rem 1.4rem; text-align: center;'>
+                <div style='font-size: 1.6rem; font-weight: 600; color: #99582f;'>{total_count}</div>
+                <div style='font-size: 1rem; color: #99582f;'>Total</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # (Keep the summary function for accessibility, but visually use the new card)
+    # _render_availability_summary(total_count, free_count, busy_count, blocked_count)
 
     st.markdown("#### Filter Assistants")
     status_label_map = {
