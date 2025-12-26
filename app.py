@@ -2053,6 +2053,8 @@ def _render_assistant_cards(card_entries: list[dict[str, Any]]) -> None:
                     st.caption(f"Dept: {department}")
 
 # --- Reminder settings in sidebar ---
+
+# --- Sidebar: Notifications & Auto-Allotment ---
 with st.sidebar:
     st.markdown("## 🔔 Notifications")
     st.checkbox("Enable 15-minute reminders", value=True, key="enable_reminders")
@@ -2063,6 +2065,19 @@ with st.sidebar:
         key="default_snooze_seconds",
     )
     st.write("💡 Reminders alert 15 minutes before a patient's In Time.")
+
+    st.markdown("---")
+    st.markdown("## 🤖 Auto-Allotment")
+    st.session_state.auto_assign_assistants = st.checkbox(
+        "Auto-assign assistants",
+        value=st.session_state.get("auto_assign_assistants", True),
+        help="Automatically fill FIRST/SECOND/Third based on rules and availability."
+    )
+    st.session_state.auto_assign_only_empty = st.checkbox(
+        "Only fill empty slots",
+        value=st.session_state.get("auto_assign_only_empty", True),
+        help="If enabled, only empty assistant slots will be auto-filled."
+    )
 
 # ================ WEEKLY OFF DISPLAY ================
 with st.sidebar:
