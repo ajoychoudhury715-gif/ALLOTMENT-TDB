@@ -3483,7 +3483,21 @@ with st.sidebar:
                         pass
         # Debug: Show raw time_blocks and meta
         st.markdown("---")
-        st.markdown("**[DEBUG] Raw time_blocks in session_state:**")
+        st.markdown("**[DEBUG] Time Blocks (formatted):**")
+        def _format_block(block):
+            return {
+                'Assistant': block.get('assistant', ''),
+                'Start': block.get('start_time').strftime('%H:%M') if block.get('start_time') else '',
+                'End': block.get('end_time').strftime('%H:%M') if block.get('end_time') else '',
+                'Date': block.get('date', ''),
+                'Reason': block.get('reason', '')
+            }
+        try:
+            formatted_blocks = [_format_block(b) for b in st.session_state.time_blocks]
+            st.dataframe(formatted_blocks, hide_index=True)
+        except Exception as e:
+            st.warning(f"[DEBUG] Error formatting time_blocks: {e}")
+        st.markdown("**[DEBUG] Raw time_blocks (JSON):**")
         st.json(st.session_state.time_blocks)
         try:
             meta = df_raw.attrs.get("meta", {}) if hasattr(df_raw, "attrs") else {}
