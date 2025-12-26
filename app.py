@@ -4711,9 +4711,17 @@ with dept_tabs[0]:
 
     # Calculate numbers before rendering HTML
     total_count = len(assistant_entries)
-    free_count = sum(1 for entry in assistant_entries if _norm_status_value(entry["info"].get("status")) == "FREE")
-    busy_count = sum(1 for entry in assistant_entries if _norm_status_value(entry["info"].get("status")) == "BUSY")
-    blocked_count = sum(1 for entry in assistant_entries if _norm_status_value(entry["info"].get("status")) == "BLOCKED")
+    # Normalize status and include alternate status values for busy and blocked
+    def is_free(status):
+        return status in ["FREE"]
+    def is_busy(status):
+        return status in ["BUSY", "ON GOING", "ARRIVED"]
+    def is_blocked(status):
+        return status in ["BLOCKED", "CANCELLED", "SHIFTED"]
+
+    free_count = sum(1 for entry in assistant_entries if is_free(_norm_status_value(entry["info"].get("status"))))
+    busy_count = sum(1 for entry in assistant_entries if is_busy(_norm_status_value(entry["info"].get("status"))))
+    blocked_count = sum(1 for entry in assistant_entries if is_blocked(_norm_status_value(entry["info"].get("status"))))
 
     st.markdown(f"""
     <div style='display: flex; align-items: center; gap: 1.5rem; margin-bottom: 1.2rem;'>
