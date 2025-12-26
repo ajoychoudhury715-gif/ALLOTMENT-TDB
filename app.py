@@ -3896,6 +3896,40 @@ if st.session_state.get("pending_changes"):
     st.warning("You have pending changes that are not saved yet.")
 
 # Add new patient button and save button
+
+# Automatically add a new empty patient row if the last row is not empty
+def is_row_empty(row):
+    # Consider a row empty if Patient Name, In Time, Out Time, Procedure, DR. are all blank/None
+    return all(
+        not str(row.get(col, '')).strip()
+        for col in ["Patient Name", "In Time", "Out Time", "Procedure", "DR."]
+    )
+
+if not df_raw.empty:
+    last_row = df_raw.iloc[-1]
+    if not is_row_empty(last_row):
+        # Add a new empty row
+        new_row = {
+            "Patient ID": "",
+            "Patient Name": "",
+            "In Time": None,
+            "Out Time": None,
+            "Procedure": "",
+            "DR.": "",
+            "FIRST": "",
+            "SECOND": "",
+            "Third": "",
+            "CASE PAPER": "",
+            "OP": "",
+            "SUCTION": False,
+            "CLEANING": False,
+            "STATUS": "WAITING",
+            "REMINDER_ROW_ID": str(uuid.uuid4()),
+            "REMINDER_SNOOZE_UNTIL": pd.NA,
+            "REMINDER_DISMISSED": False
+        }
+        df_raw = pd.concat([df_raw, pd.DataFrame([new_row])], ignore_index=True)
+
 col_add, col_save, col_del_pick, col_del_btn, col_search = st.columns([0.20, 0.16, 0.18, 0.07, 0.39])
 
 # Selected patient from external patient DB (optional)
