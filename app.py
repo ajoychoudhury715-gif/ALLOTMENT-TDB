@@ -4709,7 +4709,13 @@ dept_tabs = st.tabs(["📊 All Assistants", "🦷 PROSTHO Department", "🔬 END
 
 with dept_tabs[0]:
 
-    st.markdown("""
+    # Calculate numbers before rendering HTML
+    total_count = len(assistant_entries)
+    free_count = sum(1 for entry in assistant_entries if _norm_status_value(entry["info"].get("status")) == "FREE")
+    busy_count = sum(1 for entry in assistant_entries if _norm_status_value(entry["info"].get("status")) == "BUSY")
+    blocked_count = sum(1 for entry in assistant_entries if _norm_status_value(entry["info"].get("status")) == "BLOCKED")
+
+    st.markdown(f"""
     <div style='display: flex; align-items: center; gap: 1.5rem; margin-bottom: 1.2rem;'>
         <div style='background: var(--glass-bg, #f5f5f5); border: 1.5px solid var(--glass-border, #c9bbb0); border-radius: 1.2rem; padding: 1.2rem 2.2rem; box-shadow: 0 2px 8px rgba(0,0,0,0.04); min-width: 220px;'>
             <div style='font-size: 2.2rem; font-weight: 700; color: var(--text-primary, #111b26); margin-bottom: 0.2rem;'>Overview</div>
@@ -4735,9 +4741,6 @@ with dept_tabs[0]:
         </div>
     </div>
     """, unsafe_allow_html=True)
-
-    # (Keep the summary function for accessibility, but visually use the new card)
-    # _render_availability_summary(total_count, free_count, busy_count, blocked_count)
 
     st.markdown("#### Filter Assistants")
     status_label_map = {
