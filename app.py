@@ -1021,7 +1021,10 @@ with col_title:
     """, unsafe_allow_html=True)
 
 # Indian Standard Time (IST = UTC+5:30)
+
 IST = timezone(timedelta(hours=5, minutes=30))
+
+# Always update 'now' at the top of the main script body for correct time blocking
 now = datetime.now(IST)
 date_line_str = now.strftime('%B %d, %Y - %I:%M:%S %p')
 
@@ -3379,11 +3382,16 @@ with st.sidebar:
             key="block_assistant_select",
         )
 
+
+        # For debug/demo: auto-fill start and end time to cover current time
+        now_dt = datetime.now()
+        block_start_default = (now_dt - timedelta(minutes=2)).time().replace(second=0, microsecond=0)
+        block_end_default = (now_dt + timedelta(minutes=2)).time().replace(second=0, microsecond=0)
         col_start, col_end = st.columns(2)
         with col_start:
-            block_start = st.time_input("Start Time", value=time_type(9, 0), key="block_start_time")
+            block_start = st.time_input("Start Time", value=block_start_default, key="block_start_time")
         with col_end:
-            block_end = st.time_input("End Time", value=time_type(10, 0), key="block_end_time")
+            block_end = st.time_input("End Time", value=block_end_default, key="block_end_time")
 
         block_reason = st.text_input(
             "Reason",
@@ -3397,14 +3405,10 @@ with st.sidebar:
                 st.warning("Please select an assistant")
             else:
                 add_time_block(block_assistant, block_start, block_end, block_reason)
-                _maybe_save(df_raw, show_toast=True, message="Time block saved")
+                save_data(df_raw, show_toast=True, message="Time block saved")
                 st.success(
                     f"✅ Blocked {block_assistant} from {block_start.strftime('%H:%M')} to {block_end.strftime('%H:%M')}"
                 )
-                # Force reload from storage to ensure persistence
-                if st.session_state.get("auto_save_enabled", False):
-                    _sync_time_blocks_from_meta(df_raw)
-                st.rerun()
 
     # Show current time blocks
     if st.session_state.get("time_blocks"):
@@ -3423,13 +3427,20 @@ with st.sidebar:
                     try:
                         actual_idx = st.session_state.time_blocks.index(block)
                         remove_time_block(actual_idx)
-                        _maybe_save(df_raw, show_toast=True, message="Time block removed")
-                        # Force reload from storage to ensure persistence
-                        if st.session_state.get("auto_save_enabled", False):
-                            _sync_time_blocks_from_meta(df_raw)
+                        save_data(df_raw, show_toast=True, message="Time block removed")
+                        st.success("Time block removed.")
                     except Exception:
                         pass
-                    st.rerun()
+        # Debug: Show raw time_blocks and meta
+        st.markdown("---")
+        st.markdown("**[DEBUG] Raw time_blocks in session_state:**")
+        st.json(st.session_state.time_blocks)
+        try:
+            meta = df_raw.attrs.get("meta", {}) if hasattr(df_raw, "attrs") else {}
+            st.markdown("**[DEBUG] Meta in DataFrame:**")
+            st.json(meta)
+        except Exception as e:
+            st.warning(f"[DEBUG] Error reading meta: {e}")
     else:
         st.caption("No time blocks set for today")
 
@@ -3854,7 +3865,7 @@ with col_add:
         df_raw_with_new = pd.concat([df_raw, new_row_df], ignore_index=True)
         # Always save immediately when adding a new patient
         save_data(df_raw_with_new, message="New patient row added!")
-        st.rerun()
+        st.success("New patient row added!")
 
 with col_save:
     # Save button for the data editor
@@ -4080,61 +4091,80 @@ def _compute_overtime_min(_row) -> int | None:
 
 display_all["Overtime (min)"] = all_sorted.apply(_compute_overtime_min, axis=1)
 
-edited_all = st.data_editor(
-    display_all, 
-    width="stretch", 
-    key="full_schedule_editor", 
-    hide_index=True,
-    disabled=["STATUS_CHANGED_AT", "ACTUAL_START_AT", "ACTUAL_END_AT", "Overtime (min)"],
-    column_config={
-        "_orig_idx": None,  # Hide the original index column
-        "Patient Name": st.column_config.TextColumn(label="Patient Name"),
-        "In Time": st.column_config.TimeColumn(label="In Time", format="hh:mm A"),
-        "Out Time": st.column_config.TimeColumn(label="Out Time", format="hh:mm A"),
-        "Procedure": st.column_config.TextColumn(label="Procedure"),
-        "DR.": st.column_config.SelectboxColumn(
-            label="DR.",
-            options=DOCTOR_OPTIONS,
-            required=False
-        ),
-        "OP": st.column_config.SelectboxColumn(
-            label="OP",
-            options=["OP 1", "OP 2", "OP 3", "OP 4"],
-            required=False
-        ),
-        "FIRST": st.column_config.SelectboxColumn(
-            label="FIRST",
-            options=ASSISTANT_OPTIONS,
-            required=False
-        ),
-        "SECOND": st.column_config.SelectboxColumn(
-            label="SECOND",
-            options=ASSISTANT_OPTIONS,
-            required=False
-        ),
-        "Third": st.column_config.SelectboxColumn(
-            label="Third",
-            options=ASSISTANT_OPTIONS,
-            required=False
-        ),
-        "CASE PAPER": st.column_config.SelectboxColumn(
-            label="CASE PAPER",
-            options=ASSISTANT_OPTIONS,
-            required=False
-        ),
-        "SUCTION": st.column_config.CheckboxColumn(label="✨ SUCTION"),
-        "CLEANING": st.column_config.CheckboxColumn(label="🧹 CLEANING"),
-        "STATUS_CHANGED_AT": None,
-        "ACTUAL_START_AT": None,
-        "ACTUAL_END_AT": None,
-        "Overtime (min)": None,
-        "STATUS": st.column_config.SelectboxColumn(
-            label="STATUS",
-            options=STATUS_OPTIONS,
-            required=False
-        )
-    }
-)
+# Edit mode toggle to prevent flickering during normal viewing
+if "edit_mode" not in st.session_state:
+    st.session_state.edit_mode = False
+
+col_edit_toggle, col_save = st.columns([1, 1])
+with col_edit_toggle:
+    if st.button("✏️ Edit Schedule" if not st.session_state.edit_mode else "👁️ View Only", use_container_width=True):
+        st.session_state.edit_mode = not st.session_state.edit_mode
+
+if st.session_state.edit_mode:
+    edited_all = st.data_editor(
+        display_all, 
+        width="stretch", 
+        key="full_schedule_editor", 
+        hide_index=True,
+        disabled=["STATUS_CHANGED_AT", "ACTUAL_START_AT", "ACTUAL_END_AT", "Overtime (min)"],
+        column_config={
+            "_orig_idx": None,  # Hide the original index column
+            "Patient Name": st.column_config.TextColumn(label="Patient Name"),
+            "In Time": st.column_config.TimeColumn(label="In Time", format="hh:mm A"),
+            "Out Time": st.column_config.TimeColumn(label="Out Time", format="hh:mm A"),
+            "Procedure": st.column_config.TextColumn(label="Procedure"),
+            "DR.": st.column_config.SelectboxColumn(
+                label="DR.",
+                options=DOCTOR_OPTIONS,
+                required=False
+            ),
+            "OP": st.column_config.SelectboxColumn(
+                label="OP",
+                options=["OP 1", "OP 2", "OP 3", "OP 4"],
+                required=False
+            ),
+            "FIRST": st.column_config.SelectboxColumn(
+                label="FIRST",
+                options=ASSISTANT_OPTIONS,
+                required=False
+            ),
+            "SECOND": st.column_config.SelectboxColumn(
+                label="SECOND",
+                options=ASSISTANT_OPTIONS,
+                required=False
+            ),
+            "Third": st.column_config.SelectboxColumn(
+                label="Third",
+                options=ASSISTANT_OPTIONS,
+                required=False
+            ),
+            "CASE PAPER": st.column_config.SelectboxColumn(
+                label="CASE PAPER",
+                options=ASSISTANT_OPTIONS,
+                required=False
+            ),
+            "SUCTION": st.column_config.CheckboxColumn(label="✨ SUCTION"),
+            "CLEANING": st.column_config.CheckboxColumn(label="🧹 CLEANING"),
+            "STATUS_CHANGED_AT": None,
+            "ACTUAL_START_AT": None,
+            "ACTUAL_END_AT": None,
+            "Overtime (min)": None,
+            "STATUS": st.column_config.SelectboxColumn(
+                label="STATUS",
+                options=STATUS_OPTIONS,
+                required=False
+            )
+        }
+    )
+else:
+    # Show read-only table when not in edit mode
+    st.dataframe(display_all.drop(columns=["_orig_idx", "STATUS_CHANGED_AT", "ACTUAL_START_AT", "ACTUAL_END_AT"]), use_container_width=True, hide_index=True)
+    edited_all = None
+
+with col_save:
+    # Save button for the data editor
+    if st.button("💾 Save Changes", key="manual_save_full", use_container_width=True, type="primary"):
+        st.session_state.manual_save_triggered = True
 
 # ================ Manual save: process edits only when user clicks save button ================
 if st.session_state.get("manual_save_triggered"):
