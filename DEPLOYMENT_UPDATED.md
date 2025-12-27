@@ -319,3 +319,50 @@ The application includes:
 - ✅ Professional dental clinic management features
 
 Simply deploy to Streamlit Cloud with your Clerk authentication configuration and you're live! 🚀
+
+---
+
+# Deployment Instructions: Clerk + Supabase + Streamlit + Flask Backend
+
+## 1. Deploy the Flask Backend (Render.com)
+
+1. Push all code to GitHub (already done).
+2. Go to https://dashboard.render.com and click "New +" → "Web Service".
+3. Connect your GitHub repo and select the `backend/` folder.
+4. Render will auto-detect `render.yaml` and set up the service.
+5. Set environment variables as in `backend/.env.example` (or use the ones in `render.yaml`).
+6. Deploy! Note your backend URL (e.g., `https://clerk-supabase-backend.onrender.com`).
+
+## 2. Update Streamlit App
+
+- In `app.py`, set `BACKEND_URL` to your deployed backend URL (already set for Render).
+- If deploying elsewhere, update this variable accordingly.
+
+## 3. Deploy Streamlit App (Streamlit Community Cloud)
+
+1. Go to https://share.streamlit.io/ and sign in.
+2. Click "New app" and select your repo and branch.
+3. Set environment variable `BACKEND_URL` to your backend’s public URL.
+4. Deploy!
+
+## 4. Clerk & Supabase Setup
+
+- Clerk: Use your dashboard to manage OAuth providers and keys.
+- Supabase: Never expose your service_role_key in frontend code. Only backend uses it.
+
+## 5. Test the Flow
+
+- Visit your Streamlit app URL.
+- Click "Login with Clerk".
+- Complete OAuth, get redirected, and see your user info and Supabase token.
+
+---
+
+**Troubleshooting:**
+- If login fails, check backend logs on Render.
+- If Streamlit can’t reach backend, check CORS and public URL.
+- For production, use HTTPS everywhere and secure your secrets.
+
+---
+
+For more help, see Clerk, Supabase, and Streamlit docs or ask for platform-specific automation!
