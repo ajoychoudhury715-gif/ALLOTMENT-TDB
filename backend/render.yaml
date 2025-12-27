@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: clerk-supabase-backend
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python app.py"
+    envVars:
+      - key: CLERK_PUBLISHABLE_KEY
+        value: pk_test_Z2xvd2luZy1lbGYtNTYuY2xlcmsuYWNjb3VudHMuZGV2JA
+      - key: CLERK_SECRET_KEY
+        value: sk_test_Onh1bFpsvAiymehabxPTJ4Juzzr7W5QkJ4WBqDWG6U
+      - key: CLERK_REDIRECT_URI
+        value: https://YOUR-STREAMLIT-URL/auth/clerk/callback
+      - key: SUPABASE_URL
+        value: https://iulgvbjkqcrwwnrwjolh.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1bGd2YmprcWNyd3ducndqb2xoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NjQyNDM1NSwiZXhwIjoyMDgyMDAwMzU1fQ.PlilHFvaHxCTCdXHQILJ07enCTwTarOphYILnO9RIwU
+      - key: FLASK_SECRET_KEY
+        value: supersecret
