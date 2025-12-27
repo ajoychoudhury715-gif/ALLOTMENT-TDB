@@ -1,0 +1,13 @@
+[Unit]
+Description=Clerk+Supabase Flask Backend
+After=network.target
+
+[Service]
+User=www-data
+WorkingDirectory=/workspaces/ALLOTMENT-TDB/backend
+EnvironmentFile=/workspaces/ALLOTMENT-TDB/backend/.env
+ExecStart=/path/to/ALLOTMENT-TDB/backend/gunicorn_start.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
