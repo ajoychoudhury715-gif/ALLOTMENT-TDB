@@ -1,4 +1,4 @@
-# 🔧 Clerk Login Troubleshooting Guide
+npx create-next-app@latest nextjs-app --use-npm# 🔧 Clerk Login Troubleshooting Guide
 
 ## Common Issues and Solutions for Clerk Authentication
 
