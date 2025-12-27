@@ -14,6 +14,19 @@ import json
 import io
 import html
 
+# Clerk Authentication Integration
+from auth_clerk import (
+    is_authenticated,
+    get_user_info,
+    has_permission,
+    require_authentication,
+    show_login_page,
+    handle_auth_callback,
+    show_user_profile,
+    logout_user,
+    auth
+)
+
 try:
     # Altair was previously used for a status dashboard chart.
     # Kept as a try-block placeholder to avoid breaking older deployments that
@@ -48,7 +61,22 @@ GSHEETS_AVAILABLE = _gsheets_available
 # pip install pandas openpyxl streamlit gspread google-auth
 
 # Page config
-st.set_page_config(page_title="ALLOTMENT", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="ALLOTMENT - Secure Dashboard", layout="wide", initial_sidebar_state="collapsed")
+
+# ================ AUTHENTICATION FLOW ================
+# Check for OAuth callback first
+query_params = st.query_params
+if 'code' in query_params and 'state' in query_params:
+    handle_auth_callback()
+    st.stop()
+
+# Require authentication for the main dashboard
+user_info = require_authentication()
+if user_info is None:
+    st.stop()  # Authentication required, show_login_page() already called
+
+# Add user info to session state for use throughout the app
+st.session_state.current_user = user_info
 
 # Global save-mode flags
 if "auto_save_enabled" not in st.session_state:
@@ -102,6 +130,28 @@ if "dark_mode" not in st.session_state:
 
 with st.sidebar:
     st.toggle("🌙 Dark mode", key="dark_mode")
+    
+    # ================ USER AUTHENTICATION SECTION ================
+    st.markdown("---")
+    st.markdown("## 👤 Authentication")
+    
+    # Show user info
+    if 'current_user' in st.session_state:
+        user = st.session_state.current_user
+        st.markdown(f"**Welcome, {user.get('first_name', 'User')}!**")
+        st.markdown(f"Role: {user.get('role', 'viewer').title()}")
+        st.markdown(f"Department: {user.get('department', 'N/A')}")
+        
+        # User actions
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("👤 Profile", use_container_width=True):
+                show_user_profile()
+        with col2:
+            if st.button("🚪 Logout", use_container_width=True):
+                logout_user()
+    
+    st.markdown("---")
 
 COLORS = DARK_COLORS if bool(st.session_state.get("dark_mode")) else LIGHT_COLORS
 
@@ -3519,8 +3569,11 @@ with st.sidebar:
 # ================ RESET / CLEAR ALL ALLOTMENTS ================
 with st.sidebar:
     st.markdown("---")
-    st.markdown("## 🧹 Reset Schedule")
-    st.caption("Clear all current patient appointments/allotments (keeps time blocks).")
+    
+    # Only show reset functionality to users with clear_schedule permission
+    if has_permission('clear_schedule'):
+        st.markdown("## 🧹 Reset Schedule")
+        st.caption("Clear all current patient appointments/allotments (keeps time blocks).")
 
     backup_name_base = f"tdb_allotment_backup_{now.strftime('%Y%m%d_%H%M')}"
     try:
@@ -3584,6 +3637,33 @@ with st.sidebar:
                     st.rerun()
             except Exception as e:
                 st.error(f"Error clearing schedule: {e}")
+    else:
+        # Show limited functionality for users without clear_schedule permission
+        st.markdown("## 🧹 Reset Schedule")
+        st.info("🔒 Clear Schedule")
+        st.caption("Contact an administrator to clear the schedule.")
+        
+        # Show backup download for all authenticated users
+        st.markdown("**Download Backup:**")
+        backup_name_base = f"tdb_allotment_backup_{now.strftime('%Y%m%d_%H%M')}"
+        try:
+            csv_bytes, xlsx_bytes = _build_schedule_backups(df_raw)
+            st.download_button(
+                "⬇️ CSV",
+                data=csv_bytes,
+                file_name=f"{backup_name_base}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+            st.download_button(
+                "⬇️ Excel",
+                data=xlsx_bytes,
+                file_name=f"{backup_name_base}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        except Exception:
+            st.caption("Backup download unavailable.")
 
 # Helper to persist reminder state
 def _persist_reminder_to_storage(row_id, until, dismissed):
@@ -3939,131 +4019,152 @@ if "selected_patient_name" not in st.session_state:
     st.session_state.selected_patient_name = ""
 
 with col_add:
-    if st.button(
-        "➕ Add Patient",
-        key="add_patient_btn",
-        help="Add a new patient row (uses selected patient if chosen)",
-        use_container_width=True,
-    ):
-        # Create a new empty row
-        new_row = {
-            "Patient ID": str(st.session_state.selected_patient_id or "").strip(),
-            "Patient Name": str(st.session_state.selected_patient_name or "").strip(),
-            "In Time": None,
-            "Out Time": None,
-            "Procedure": "",
-            "DR.": "",
-            "FIRST": "",
-            "SECOND": "",
-            "Third": "",
-            "CASE PAPER": "",
-            "OP": "",
-            "SUCTION": False,
-            "CLEANING": False,
-            "STATUS": "WAITING",
-            "REMINDER_ROW_ID": str(uuid.uuid4()),
-            "REMINDER_SNOOZE_UNTIL": pd.NA,
-            "REMINDER_DISMISSED": False
-        }
-        # Append to the original dataframe
-        new_row_df = pd.DataFrame([new_row])
-        df_raw_with_new = pd.concat([df_raw, new_row_df], ignore_index=True)
-        # Always save immediately when adding a new patient
-        save_data(df_raw_with_new, message="New patient row added!")
-        st.success("New patient row added!")
+    # Add Patient button - only show for users with edit_appointments permission
+    if has_permission('edit_appointments'):
+        if st.button(
+            "➕ Add Patient",
+            key="add_patient_btn",
+            help="Add a new patient row (uses selected patient if chosen)",
+            use_container_width=True,
+        ):
+            # Create a new empty row
+            new_row = {
+                "Patient ID": str(st.session_state.selected_patient_id or "").strip(),
+                "Patient Name": str(st.session_state.selected_patient_name or "").strip(),
+                "In Time": None,
+                "Out Time": None,
+                "Procedure": "",
+                "DR.": "",
+                "FIRST": "",
+                "SECOND": "",
+                "Third": "",
+                "CASE PAPER": "",
+                "OP": "",
+                "SUCTION": False,
+                "CLEANING": False,
+                "STATUS": "WAITING",
+                "REMINDER_ROW_ID": str(uuid.uuid4()),
+                "REMINDER_SNOOZE_UNTIL": pd.NA,
+                "REMINDER_DISMISSED": False
+            }
+            # Append to the original dataframe
+            new_row_df = pd.DataFrame([new_row])
+            df_raw_with_new = pd.concat([df_raw, new_row_df], ignore_index=True)
+            # Always save immediately when adding a new patient
+            save_data(df_raw_with_new, message="New patient row added!")
+            st.success("New patient row added!")
+    else:
+        # Show read-only message for users without edit permissions
+        st.button("➕ Add Patient", key="add_patient_disabled", disabled=True, use_container_width=True)
+        st.caption("Contact administrator for edit permissions")
 
 with col_save:
-    # Save button for the data editor
-    if st.button("💾 Save Changes", key="manual_save_full", use_container_width=True, type="primary"):
-        st.session_state.manual_save_triggered = True
+    # Save button for the data editor - only show for users with edit_appointments permission
+    if has_permission('edit_appointments'):
+        if st.button("💾 Save Changes", key="manual_save_full", use_container_width=True, type="primary"):
+            st.session_state.manual_save_triggered = True
+    else:
+        st.button("🔒 Read Only", key="read_only_save", disabled=True, use_container_width=True)
+        st.caption("Contact administrator for edit permissions")
 
 with col_del_pick:
-    # Compact delete row control (uses stable REMINDER_ROW_ID)
-    try:
-        candidates = df_raw.copy()
-        if "Patient Name" in candidates.columns:
-            candidates["Patient Name"] = candidates["Patient Name"].astype(str).replace("nan", "").fillna("")
-        if "REMINDER_ROW_ID" in candidates.columns:
-            candidates["REMINDER_ROW_ID"] = candidates["REMINDER_ROW_ID"].astype(str).replace("nan", "").fillna("")
+    # Compact delete row control - only show for users with edit_appointments permission
+    if has_permission('edit_appointments'):
+        try:
+            candidates = df_raw.copy()
+            if "Patient Name" in candidates.columns:
+                candidates["Patient Name"] = candidates["Patient Name"].astype(str).replace("nan", "").fillna("")
+            if "REMINDER_ROW_ID" in candidates.columns:
+                candidates["REMINDER_ROW_ID"] = candidates["REMINDER_ROW_ID"].astype(str).replace("nan", "").fillna("")
 
-        candidates = candidates[
-            (candidates.get("REMINDER_ROW_ID", "").astype(str).str.strip() != "")
-        ]
+            candidates = candidates[
+                (candidates.get("REMINDER_ROW_ID", "").astype(str).str.strip() != "")
+            ]
 
-        option_map: dict[str, str] = {}
-        if not candidates.empty:
-            for row_ix, r in candidates.iterrows():
-                rid = str(r.get("REMINDER_ROW_ID", "")).strip()
-                if not rid:
-                    continue
-                pname_raw = str(r.get("Patient Name", "")).strip()
-                pname = pname_raw if pname_raw else "(blank row)"
-                in_t = str(r.get("In Time", "")).strip()
-                op = str(r.get("OP", "")).strip()
-                row_no = f"#{int(row_ix) + 1}" if str(row_ix).isdigit() else str(row_ix)
-                label = " · ".join([p for p in [row_no, pname, in_t, op] if p])
-                # Make option text unique even if labels repeat.
-                opt = f"{label} — {rid[:8]}" if label else rid[:8]
-                option_map[opt] = rid
+            option_map: dict[str, str] = {}
+            if not candidates.empty:
+                for row_ix, r in candidates.iterrows():
+                    rid = str(r.get("REMINDER_ROW_ID", "")).strip()
+                    if not rid:
+                        continue
+                    pname_raw = str(r.get("Patient Name", "")).strip()
+                    pname = pname_raw if pname_raw else "(blank row)"
+                    in_t = str(r.get("In Time", "")).strip()
+                    op = str(r.get("OP", "")).strip()
+                    row_no = f"#{int(row_ix) + 1}" if str(row_ix).isdigit() else str(row_ix)
+                    label = " · ".join([p for p in [row_no, pname, in_t, op] if p])
+                    # Make option text unique even if labels repeat.
+                    opt = f"{label} — {rid[:8]}" if label else rid[:8]
+                    option_map[opt] = rid
 
-        if "delete_row_id" not in st.session_state:
-            st.session_state.delete_row_id = ""
+            if "delete_row_id" not in st.session_state:
+                st.session_state.delete_row_id = ""
 
-        if option_map:
-            # Use a visible sentinel option instead of `placeholder` for wider Streamlit compatibility.
-            # Also: guard against Streamlit selectbox failing when the previously selected value
-            # is no longer present in the new options list (common after edits/deletes).
-            sentinel = "Select row to delete…"
-            options = [sentinel] + sorted(option_map.keys())
+            if option_map:
+                # Use a visible sentinel option instead of `placeholder` for wider Streamlit compatibility.
+                # Also: guard against Streamlit selectbox failing when the previously selected value
+                # is no longer present in the new options list (common after edits/deletes).
+                sentinel = "Select row to delete…"
+                options = [sentinel] + sorted(option_map.keys())
 
-            # IMPORTANT: Do not mutate st.session_state["delete_row_select"] here.
-            # Streamlit raises if you modify a widget key after it has been instantiated.
-            prev_choice = st.session_state.get("delete_row_select", sentinel)
-            default_index = options.index(prev_choice) if prev_choice in options else 0
+                # IMPORTANT: Do not mutate st.session_state["delete_row_select"] here.
+                # Streamlit raises if you modify a widget key after it has been instantiated.
+                prev_choice = st.session_state.get("delete_row_select", sentinel)
+                default_index = options.index(prev_choice) if prev_choice in options else 0
 
-            chosen = st.selectbox(
-                "Delete row",
-                options=options,
-                key="delete_row_select",
-                label_visibility="collapsed",
-                index=default_index,
-            )
-            if chosen and chosen != sentinel:
-                st.session_state.delete_row_id = option_map.get(chosen, "")
+                chosen = st.selectbox(
+                    "Delete row",
+                    options=options,
+                    key="delete_row_select",
+                    label_visibility="collapsed",
+                    index=default_index,
+                )
+                if chosen and chosen != sentinel:
+                    st.session_state.delete_row_id = option_map.get(chosen, "")
+                else:
+                    st.session_state.delete_row_id = ""
             else:
                 st.session_state.delete_row_id = ""
-        else:
-            st.session_state.delete_row_id = ""
+                st.caption("Delete row")
+        except Exception:
+            # Keep dashboard usable even if data is incomplete
             st.caption("Delete row")
-    except Exception:
-        # Keep dashboard usable even if data is incomplete
-        st.caption("Delete row")
+    else:
+        # Show read-only message for users without edit permissions
+        st.caption("🗑️ Delete Row")
+        st.caption("Contact administrator for edit permissions")
 
 with col_del_btn:
-    if st.button("⌫", key="delete_row_btn", help="Delete selected row"):
-        rid = str(st.session_state.get("delete_row_id", "") or "").strip()
-        if not rid:
-            st.warning("Select a row to delete")
-        else:
-            try:
-                if "REMINDER_ROW_ID" not in df_raw.columns:
-                    raise ValueError("Missing REMINDER_ROW_ID column")
-                df_updated = df_raw[df_raw["REMINDER_ROW_ID"].astype(str) != rid].copy()
-
-                # Clear local reminder state for this row id.
+    # Delete button - only show for users with edit_appointments permission
+    if has_permission('edit_appointments'):
+        if st.button("⌫", key="delete_row_btn", help="Delete selected row"):
+            rid = str(st.session_state.get("delete_row_id", "") or "").strip()
+            if not rid:
+                st.warning("Select a row to delete")
+            else:
                 try:
-                    if "snoozed" in st.session_state and rid in st.session_state.snoozed:
-                        del st.session_state.snoozed[rid]
-                    if "reminder_sent" in st.session_state:
-                        st.session_state.reminder_sent.discard(rid)
-                except Exception:
-                    pass
+                    if "REMINDER_ROW_ID" not in df_raw.columns:
+                        raise ValueError("Missing REMINDER_ROW_ID column")
+                    df_updated = df_raw[df_raw["REMINDER_ROW_ID"].astype(str) != rid].copy()
 
-                _maybe_save(df_updated, message="Row deleted")
-                st.session_state.delete_row_id = ""
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error deleting row: {e}")
+                    # Clear local reminder state for this row id.
+                    try:
+                        if "snoozed" in st.session_state and rid in st.session_state.snoozed:
+                            del st.session_state.snoozed[rid]
+                        if "reminder_sent" in st.session_state:
+                            st.session_state.reminder_sent.discard(rid)
+                    except Exception:
+                        pass
+
+                    _maybe_save(df_updated, message="Row deleted")
+                    st.session_state.delete_row_id = ""
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error deleting row: {e}")
+    else:
+        # Show read-only message for users without edit permissions
+        st.button("⌫", key="delete_row_disabled", disabled=True, use_container_width=True)
+        st.caption("Contact administrator for edit permissions")
 
 with col_search:
     # Patient search
@@ -4196,8 +4297,11 @@ def _compute_overtime_min(_row) -> int | None:
 
 display_all["Overtime (min)"] = all_sorted.apply(_compute_overtime_min, axis=1)
 
-edited_all = st.data_editor(
-    display_all, 
+# Data editor with role-based permissions
+if has_permission('edit_appointments'):
+    # Full editing capabilities for staff and admin
+    edited_all = st.data_editor(
+        display_all, 
     width="stretch", 
     key="full_schedule_editor", 
     hide_index=True,
@@ -4251,6 +4355,65 @@ edited_all = st.data_editor(
         )
     }
 )
+else:
+    # Read-only view for viewers - disable all editing
+    edited_all = st.data_editor(
+        display_all,
+        width="stretch", 
+        key="full_schedule_editor_readonly", 
+        hide_index=True,
+        disabled=display_all.columns.tolist(),  # Disable all columns
+        column_config={
+            "_orig_idx": None,  # Hide the original index column
+            "Patient Name": st.column_config.TextColumn(label="Patient Name"),
+            "In Time": st.column_config.TimeColumn(label="In Time", format="hh:mm A"),
+            "Out Time": st.column_config.TimeColumn(label="Out Time", format="hh:mm A"),
+            "Procedure": st.column_config.TextColumn(label="Procedure"),
+            "DR.": st.column_config.SelectboxColumn(
+                label="DR.",
+                options=DOCTOR_OPTIONS,
+                required=False
+            ),
+            "OP": st.column_config.SelectboxColumn(
+                label="OP",
+                options=["OP 1", "OP 2", "OP 3", "OP 4"],
+                required=False
+            ),
+            "FIRST": st.column_config.SelectboxColumn(
+                label="FIRST",
+                options=ASSISTANT_OPTIONS,
+                required=False
+            ),
+            "SECOND": st.column_config.SelectboxColumn(
+                label="SECOND",
+                options=ASSISTANT_OPTIONS,
+                required=False
+            ),
+            "Third": st.column_config.SelectboxColumn(
+                label="Third",
+                options=ASSISTANT_OPTIONS,
+                required=False
+            ),
+            "CASE PAPER": st.column_config.SelectboxColumn(
+                label="CASE PAPER",
+                options=ASSISTANT_OPTIONS,
+                required=False
+            ),
+            "SUCTION": st.column_config.CheckboxColumn(label="✨ SUCTION"),
+            "CLEANING": st.column_config.CheckboxColumn(label="🧹 CLEANING"),
+            "STATUS_CHANGED_AT": None,
+            "ACTUAL_START_AT": None,
+            "ACTUAL_END_AT": None,
+            "Overtime (min)": None,
+            "STATUS": st.column_config.SelectboxColumn(
+                label="STATUS",
+                options=STATUS_OPTIONS,
+                required=False
+            )
+        }
+    )
+    # Show read-only message
+    st.info("🔒 Read-only mode - Contact administrator for edit permissions")
 
 # ================ Manual save: process edits only when user clicks save button ================
 if st.session_state.get("manual_save_triggered"):
@@ -4490,8 +4653,10 @@ if unique_ops:
 
             display_op["Overtime (min)"] = op_df.apply(_compute_overtime_min, axis=1)
             
-            edited_op = st.data_editor(
-                display_op, 
+            # OP-specific data editor with role-based permissions
+            if has_permission('edit_appointments'):
+                edited_op = st.data_editor(
+                    display_op, 
                 width="stretch", 
                 key=f"op_{str(op).replace(' ', '_')}_editor", 
                 hide_index=True,
@@ -4542,6 +4707,62 @@ if unique_ops:
                     )
                 }
             )
+            else:
+                # Read-only view for viewers
+                edited_op = st.data_editor(
+                    display_op,
+                    width="stretch", 
+                    key=f"op_{str(op).replace(' ', '_')}_editor_readonly", 
+                    hide_index=True,
+                    disabled=display_op.columns.tolist(),  # Disable all columns
+                    column_config={
+                        "_orig_idx": None,
+                        "Patient ID": st.column_config.TextColumn(label="Patient ID", required=False),
+                        "In Time": st.column_config.TimeColumn(label="In Time", format="hh:mm A"),
+                        "Out Time": st.column_config.TimeColumn(label="Out Time", format="hh:mm A"),
+                        "DR.": st.column_config.SelectboxColumn(
+                            label="DR.",
+                            options=DOCTOR_OPTIONS,
+                            required=False
+                        ),
+                        "OP": st.column_config.SelectboxColumn(
+                            label="OP",
+                            options=["OP 1", "OP 2", "OP 3", "OP 4"],
+                            required=False
+                        ),
+                        "FIRST": st.column_config.SelectboxColumn(
+                            label="FIRST",
+                            options=ASSISTANT_OPTIONS,
+                            required=False
+                        ),
+                        "SECOND": st.column_config.SelectboxColumn(
+                            label="SECOND",
+                            options=ASSISTANT_OPTIONS,
+                            required=False
+                        ),
+                        "Third": st.column_config.SelectboxColumn(
+                            label="Third",
+                            options=ASSISTANT_OPTIONS,
+                            required=False
+                        ),
+                        "CASE PAPER": st.column_config.SelectboxColumn(
+                            label="CASE PAPER",
+                            options=ASSISTANT_OPTIONS,
+                            required=False
+                        ),
+                        "STATUS_CHANGED_AT": st.column_config.TextColumn(label="Status Changed At"),
+                        "ACTUAL_START_AT": st.column_config.TextColumn(label="Actual Start"),
+                        "ACTUAL_END_AT": st.column_config.TextColumn(label="Actual End"),
+                        "Overtime (min)": st.column_config.NumberColumn(label="Overtime (min)"),
+                        "STATUS": st.column_config.SelectboxColumn(
+                            label="STATUS",
+                            options=STATUS_OPTIONS,
+                            required=False
+                        )
+                    }
+                )
+                # Show read-only message
+                st.info(f"🔒 {op} - Read-only mode")
 
             # Persist edits from OP tabs
             if edited_op is not None:
@@ -4698,7 +4919,13 @@ if groupby_column in df.columns and not df[groupby_column].isnull().all():
         doctor_procedures = df[df["DR."].notna()].groupby("DR.").size().reset_index(name="Total Procedures")
         doctor_procedures = doctor_procedures.reset_index(drop=True)
         if not doctor_procedures.empty:
-            edited_doctor = st.data_editor(doctor_procedures, width="stretch", key="doctor_editor", hide_index=True)
+            # Doctor statistics editor with role-based permissions
+            if has_permission('edit_appointments'):
+                edited_doctor = st.data_editor(doctor_procedures, width="stretch", key="doctor_editor", hide_index=True)
+            else:
+                # Read-only view for viewers
+                edited_doctor = st.data_editor(doctor_procedures, width="stretch", key="doctor_editor_readonly", hide_index=True, disabled=doctor_procedures.columns.tolist())
+                st.info("🔒 Doctor Statistics - Read-only mode")
         else:
             st.info(f"No data available for '{groupby_column}'.")
     except Exception as e:
